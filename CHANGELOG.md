@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Music-QA honesty demo scenes
+- **`viewer/samples/music-qa-honesty/`**: five Qwen2.5-0.5B-Instruct prior /
+  percept / paired scenes (sycophancy, citation hallucination, noisy input,
+  memorization, register break), each with its `export-manifest` record and a
+  README that leads with their low projection fidelity: read the layer-wise
+  readouts over the 2D picture. Item 1 uses the chat template; the rest are
+  raw prompts. All prompt text is original or public domain. Not bundled in
+  the wheel.
+- Stale `bobgnarly420.github.io` / `BobGnarly420/mottled` links in the README,
+  landing page and `pyproject.toml` now point at `enactedvolition`.
+
 ### Models too big to hold (M7)
 - **`stream.stream_capture`** runs a forward pass with one block's weights in
   memory at a time: the skeleton is built with no weights, and each block is

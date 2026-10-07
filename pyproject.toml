@@ -46,8 +46,8 @@ nnsight = ["nnsight>=0.4"]
 dev = ["pytest>=7.4"]
 
 [project.urls]
-Homepage = "https://github.com/BobGnarly420/mottled"
-Documentation = "https://github.com/BobGnarly420/mottled#readme"
+Homepage = "https://github.com/enactedvolition/mottled"
+Documentation = "https://github.com/enactedvolition/mottled#readme"
 
 [project.scripts]
 mottled = "cli:main"
