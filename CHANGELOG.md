@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-02
+
 ### Models too big to hold (M7)
 - **`stream.stream_capture`** runs a forward pass with one block's weights in
   memory at a time: the skeleton is built with no weights, and each block is
