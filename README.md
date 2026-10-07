@@ -1,6 +1,6 @@
 # 🔮 Mottled
 
-[![CI](https://github.com/BobGnarly420/mottled/actions/workflows/ci.yml/badge.svg)](https://github.com/BobGnarly420/mottled/actions/workflows/ci.yml)
+[![CI](https://github.com/enactedvolition/mottled/actions/workflows/ci.yml/badge.svg)](https://github.com/enactedvolition/mottled/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **A viewer for latent dynamics: where a model's hidden states travel, turn
@@ -24,17 +24,17 @@ error: it marks where the terrain rests on too few points to trust.*
 
 ## Try it without installing anything
 
-**[bobgnarly420.github.io/mottled](https://bobgnarly420.github.io/mottled/)**
+**[enactedvolition.github.io/mottled](https://enactedvolition.github.io/mottled/)**
 is the WebGL viewer, with real captures, no build step and no dependencies.
 Hover anywhere along a trajectory for the inspector; click to pin it.
 
 | scene | what it shows |
 |---|---|
-| [`qwen-capitals`](https://bobgnarly420.github.io/mottled/viewer/?file=samples/qwen-capitals.mtj) | Qwen2.5-1.5B, 29 layers × 1536 |
-| [`gpt2-decode`](https://bobgnarly420.github.io/mottled/viewer/?file=samples/gpt2-decode.mtj) | GPT-2 *generating*: the decode axis |
-| [`models-qwen-gpt2`](https://bobgnarly420.github.io/mottled/viewer/?file=samples/models-qwen-gpt2.mtj) | two different models on one terrain |
-| [`gpt2-features`](https://bobgnarly420.github.io/mottled/viewer/?file=samples/gpt2-features.mtj) | real SAE features, with their measured fit |
-| [`self-portrait`](https://bobgnarly420.github.io/mottled/viewer/?file=samples/self-portrait.mtj) | Mottled pointed at itself (see below) |
+| [`qwen-capitals`](https://enactedvolition.github.io/mottled/viewer/?file=samples/qwen-capitals.mtj) | Qwen2.5-1.5B, 29 layers × 1536 |
+| [`gpt2-decode`](https://enactedvolition.github.io/mottled/viewer/?file=samples/gpt2-decode.mtj) | GPT-2 *generating*: the decode axis |
+| [`models-qwen-gpt2`](https://enactedvolition.github.io/mottled/viewer/?file=samples/models-qwen-gpt2.mtj) | two different models on one terrain |
+| [`gpt2-features`](https://enactedvolition.github.io/mottled/viewer/?file=samples/gpt2-features.mtj) | real SAE features, with their measured fit |
+| [`self-portrait`](https://enactedvolition.github.io/mottled/viewer/?file=samples/self-portrait.mtj) | Mottled pointed at itself (see below) |
 
 The page can also **run a model itself**. Open *Run a model in this page*,
 pick one, and capture. The picker lists models checked to load completely,
@@ -50,7 +50,7 @@ have fetched once is served from the browser's cache after that.
 ## Install
 
 ```bash
-pip install "mottled[models] @ git+https://github.com/BobGnarly420/mottled"
+pip install "mottled[models] @ git+https://github.com/enactedvolition/mottled"
 
 mottled                                    # the Streamlit explorer
 mottled serve --model gpt2                 # web viewer + capture API
@@ -307,7 +307,7 @@ both on one terrain across a 29×1536 vs 13×768 divide.
 
 ### Self-portrait
 
-[`self-portrait.mtj`](https://bobgnarly420.github.io/mottled/viewer/?file=samples/self-portrait.mtj)
+[`self-portrait.mtj`](https://enactedvolition.github.io/mottled/viewer/?file=samples/self-portrait.mtj)
 is Mottled pointed at itself: GPT-2 processing three of Mottled's own
 self-descriptions (*"Mottled visualizes hidden-state evolution as
 trajectories over a semantic manifold"*, *"the residual stream moves, turns,
