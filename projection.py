@@ -184,18 +184,35 @@ class ProjectionQuality:
     residual: np.ndarray | None
     explained_variance: float | None
     k: int
+    # Within-layer fidelity (added): the same k-NN overlap, but each layer's
+    # neighbors are searched among that layer's states only, in both spaces.
+    # The pooled `preservation` above mixes in cross-layer neighbors (the
+    # same token at adjacent layers, and layer separation), so a projection
+    # can score well on it while scrambling every layer internally; see
+    # `per_layer_preservation`. None when a layer has < 2 states.
+    per_layer: np.ndarray | None = None          # (L, T)
+    per_layer_cosine: np.ndarray | None = None   # (L, T), cosine neighbors in hidden space
+    k_layer: int | None = None
+    chance_layer: float | None = None            # expected per_layer under a random placement
 
 
-def neighborhood_preservation(X: np.ndarray, Y: np.ndarray, k: int = 10) -> np.ndarray:
+def neighborhood_preservation(X: np.ndarray, Y: np.ndarray, k: int = 10,
+                              metric: str = "euclidean") -> np.ndarray:
     """Per-point k-NN overlap between a high-dim cloud and its projection.
 
     X: (N, D) original points, Y: (N, C) projected points.  Returns (N,)
     values in [0, 1]: the fraction of each point's k nearest neighbors in X
-    that remain among its k nearest neighbors in Y.
+    that remain among its k nearest neighbors in Y.  `metric="cosine"`
+    ranks the hidden-space neighbors by angle (Euclidean on unit vectors,
+    which gives the same ranking); the projected space stays Euclidean.
     """
     from sklearn.neighbors import NearestNeighbors
 
+    if metric not in ("euclidean", "cosine"):
+        raise ValueError(f"unknown metric {metric!r}; use 'euclidean' or 'cosine'")
     X = np.asarray(X, dtype=np.float64)
+    if metric == "cosine":
+        X = X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
     Y = np.asarray(Y, dtype=np.float64)
     n = len(X)
     if n != len(Y):
@@ -241,11 +258,39 @@ def fidelity_summary(preservation, low_fidelity: float = LOW_FIDELITY) -> dict:
     }
 
 
+def per_layer_preservation(hidden: np.ndarray, coords: np.ndarray, k: int = 5,
+                           metric: str = "euclidean") -> np.ndarray:
+    """(L, T) within-layer k-NN preservation: for each layer, neighbors are
+    searched among that layer's T states only, in hidden and projected space.
+
+    This is the reading the pooled score is usually taken to give ("is the
+    local structure *at this depth* intact?"). On GPT-2 small the pooled score
+    cannot tell PCA from a random projection while this one can
+    (fidelity_experiment.py). k is clipped to T-1 per layer.
+    """
+    hidden = np.asarray(hidden)
+    coords = np.asarray(coords)
+    L, T = hidden.shape[:2]
+    out = np.empty((L, T), dtype=np.float32)
+    for layer in range(L):
+        out[layer] = neighborhood_preservation(hidden[layer], coords[layer], k=k,
+                                               metric=metric)
+    return out
+
+
+def preservation_chance(n: int, k: int) -> float:
+    """Expected k-NN overlap when the projected neighbors are a random k of
+    the other n-1 points: k / (n - 1)."""
+    k = int(min(k, n - 1))
+    return 1.0 if k < 1 else k / (n - 1)
+
+
 def projection_quality(
     hidden: np.ndarray,
     coords: np.ndarray,
     projector=None,
     k: int = 10,
+    k_layer: int = 5,
 ) -> ProjectionQuality:
     """Measure the distortion of a fitted projection, per state.
 
@@ -269,5 +314,14 @@ def projection_quality(
     if projector is not None and hasattr(projector, "explained_variance"):
         explained = float(projector.explained_variance)
 
+    per_layer = per_layer_cos = chance = kl = None
+    if T >= 2:
+        kl = int(min(k_layer, T - 1))
+        per_layer = per_layer_preservation(hidden, coords, k=kl)
+        per_layer_cos = per_layer_preservation(hidden, coords, k=kl, metric="cosine")
+        chance = preservation_chance(T, kl)
+
     return ProjectionQuality(preservation=preservation, residual=residual,
-                             explained_variance=explained, k=int(min(k, L * T - 1)))
+                             explained_variance=explained, k=int(min(k, L * T - 1)),
+                             per_layer=per_layer, per_layer_cosine=per_layer_cos,
+                             k_layer=kl, chance_layer=chance)
