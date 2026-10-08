@@ -275,6 +275,13 @@ def save_scene(result: dict, path_or_fh) -> None:
         # model and dictionary identity, so a scene that outlives the session
         # that made it can still say what it is — additive, old readers ignore it
         manifest["analysis"] = _jsonable(result["analysis"])
+    if result.get("blast"):
+        # one pellet per prompt (blast.py): the run above is the pellets drawn
+        # at the first layout, so a viewer that predates this record still
+        # shows them flying out of the muzzle; this record holds every layout
+        # and what each one's axes are. Pellet texts and labels are in
+        # meta["pellets"]. Additive, old readers ignore it.
+        manifest["blast"] = _blast_manifest(result["blast"], w)
     if result.get("comparisons"):
         manifest["comparisons"] = [
             {"label": chr(65 + i), "hausdorff": float(c.hausdorff),
@@ -285,6 +292,23 @@ def save_scene(result: dict, path_or_fh) -> None:
             for i, c in enumerate(result["comparisons"], start=1)
         ]
     _write(path_or_fh, manifest, w)
+
+
+def _blast_manifest(record: dict, w: _Writer) -> dict:
+    layouts = []
+    for i, b in enumerate(record["layouts"]):
+        layouts.append({
+            "name": b.name, "method": b.method, "driver": b.driver,
+            "positions": w.add(f"blast.{i}.positions", b.positions.astype(np.float32)),
+            "quality": w.add(f"blast.{i}.quality", b.quality.astype(np.float32)),
+            "exact": list(b.exact), "fitted": list(b.fitted),
+            "projected": list(b.projected),
+            "arrays": {k: w.add(f"blast.{i}.{k}", v) for k, v in b.arrays.items()},
+            "params": _jsonable(b.params),
+        })
+    return {"schema": "mottled-blast/1", "layouts": layouts,
+            "skipped": list(record.get("skipped", [])),
+            **{k: w.add(f"blast.{k}", record[k]) for k in ("range", "spread", "norm")}}
 
 
 def load_scene(path_or_fh) -> dict:
@@ -316,6 +340,17 @@ def load_scene(path_or_fh) -> dict:
                    for k in ("recon_error", "top_id", "top_act")
                    if run["features"].get(k) in arrays},
             }
+    if isinstance(scene.get("blast"), dict):
+        b = scene["blast"]
+        scene["blast"] = {
+            **b, **{k: arrays[b[k]] for k in ("range", "spread", "norm") if b.get(k) in arrays},
+            "layouts": [{**lay,
+                         **{k: arrays[lay[k]] for k in ("positions", "quality")
+                            if lay.get(k) in arrays},
+                         "arrays": {k: arrays[v] for k, v in lay.get("arrays", {}).items()
+                                    if v in arrays}}
+                        for lay in b.get("layouts", [])],
+        }
     return scene
 
 

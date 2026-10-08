@@ -56,8 +56,19 @@
 </div>
 
 <div id="runs-panel" hidden>
-  <div class="panel-head">runs</div>
+  <div id="runs-head" class="panel-head">runs</div>
   <div id="runs-list"></div>
+  <div id="blast-panel" hidden>
+    <div id="blastLayouts" class="seg" role="group" aria-label="layout"></div>
+    <label class="blast-colour"><span class="dim">colour by</span>
+      <select id="blastColour"></select></label>
+    <div id="blastLegend"></div>
+    <div id="blastReadout" class="mono"></div>
+    <details id="blastCaption">
+      <summary>what the axes are</summary>
+      <div id="blastCaptionBody"></div>
+    </details>
+  </div>
   <div id="comparisons"></div>
   <label id="attn-row" hidden><input type="checkbox" id="attnToggle"> attention flow</label>
   <label id="uncertainty-row" hidden><input type="checkbox" id="uncertaintyToggle"> uncertainty (density SE)</label>

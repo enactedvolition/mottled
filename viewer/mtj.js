@@ -196,7 +196,65 @@
     });
     if (!runs.length) throw new Error("corrupt scene: no runs");
 
-    return { manifest, arrays, meta: manifest.meta || {}, terrain, runs, comparisons: manifest.comparisons || [] };
+    return { manifest, arrays, meta: manifest.meta || {}, terrain, runs,
+             comparisons: manifest.comparisons || [],
+             blast: resolveBlast(manifest.blast, manifest.meta, arrays, runs[0]) };
+  }
+
+  // Optional `blast` record (blast.py): one pellet per prompt, with every
+  // layout the writer built. The scene's run 0 is the pellets drawn at the
+  // first layout, so a viewer without this code still shows them; this
+  // record adds the other layouts and what each one's axes mean. A layout
+  // whose positions are missing or the wrong shape is dropped; when none
+  // survives, or the pellets do not match run 0, the record reads null
+  // (same contract as `features` and `inspector`).
+  function resolveBlast(b, meta, arrays, run0) {
+    if (!b || typeof b !== "object" || Array.isArray(b)) return null;
+    const n = run0.points.shape[0], L = run0.points.shape[1];
+    const pellets = meta && Array.isArray(meta.pellets) ? meta.pellets : null;
+    if (!pellets || pellets.length !== n) return null;
+    const arr = (ref, shape) => {
+      const a = typeof ref === "string" ? arrays[ref] : null;
+      if (!a || a.shape.length !== shape.length) return null;
+      return a.shape.every((s, i) => shape[i] == null || s === shape[i]) ? a : null;
+    };
+    const strings = (x) => (Array.isArray(x) ? x.map(String) : []);
+    const layouts = (Array.isArray(b.layouts) ? b.layouts : []).map((lay) => {
+      if (!lay || typeof lay !== "object") return null;
+      const positions = arr(lay.positions, [n, L, 2]);
+      if (!positions) return null;
+      const extra = {};
+      const refs = lay.arrays && typeof lay.arrays === "object" ? lay.arrays : {};
+      for (const k of Object.keys(refs)) {
+        const a = typeof refs[k] === "string" ? arrays[refs[k]] : null;
+        if (a) extra[k] = a;
+      }
+      return {
+        name: lay.name != null ? String(lay.name) : String(lay.method || "layout"),
+        method: lay.method != null ? String(lay.method) : null,
+        driver: typeof lay.driver === "string" ? lay.driver : null,
+        positions,                              // (N, L, 2) float32
+        quality: arr(lay.quality, [L, n]),      // (L, N) or null
+        exact: strings(lay.exact), fitted: strings(lay.fitted),
+        projected: strings(lay.projected),
+        arrays: extra,                          // monitor: auroc, null05, null95 (L,), labelled (N,)
+        params: lay.params && typeof lay.params === "object" ? lay.params : {},
+      };
+    }).filter(Boolean);
+    if (!layouts.length) return null;
+    return {
+      schema: typeof b.schema === "string" ? b.schema : null,
+      pellets: pellets.map((p) => ({
+        id: p && p.id != null ? String(p.id) : "",
+        text: p && p.text != null ? String(p.text) : "",
+        labels: p && p.labels && typeof p.labels === "object" ? p.labels : {},
+      })),
+      layouts,
+      skipped: strings(b.skipped),
+      range: arr(b.range, [n, L]),             // (N, L) exact distance from origin
+      spread: arr(b.spread, [L]),              // (L,) RMS of range
+      norm: arr(b.norm, [L]),                  // (L,) the unit: mean state norm
+    };
   }
 
   // ------------------------------------------------ generation (decode) helpers
@@ -346,8 +404,203 @@
     return { attn: cs.data[o], mlp: cs.data[o + 1] };
   }
 
+  // ------------------------------------------------ blast (pellet family) helpers
+  // What the viewer decides about a resolved `blast` record: what a pellet's
+  // colour means, which pellets get a ring, and what the readout at a layer
+  // says. They live here, not in main.js, so `node --test` holds the wording
+  // and the arithmetic to account. Everything is null-safe in the same way as
+  // the helpers above: a missing label reads as "no label", never as 0.
+
+  // design_tokens.py AMBER / ACCENT / FG_2 / FG_1, as viewer/style.css
+  // mirrors them (blast.test.js fails if these drift from the CSS). The 1
+  // class takes the flag colour because a label names what it flags
+  // (harmful, refused, false_claim); amber against blue also stays apart
+  // under the common colour-vision deficiencies, where blue/teal does not.
+  const BLAST_COLOURS = { one: "#D4934A", zero: "#4B7CF3", none: "#818FB8", ring: "#EDF0FA" };
+
+  function blastLabelValue(labels, name) {
+    // 1, 0 or null. The writer accepts exactly 0, 1, true, false and null
+    // (blast.label_vector); anything else is not guessed at
+    const v = labels && typeof labels === "object" ? labels[name] : undefined;
+    if (v === 1 || v === true) return 1;
+    if (v === 0 || v === false) return 0;
+    return null;
+  }
+
+  function blastLabelNames(blast) {
+    // every label name any pellet carries, in the order the data first uses it
+    const out = [];
+    for (const p of (blast && blast.pellets) || [])
+      for (const k of Object.keys((p && p.labels) || {})) if (!out.includes(k)) out.push(k);
+    return out;
+  }
+
+  function blastColourLabel(blast, layout, chosen, current) {
+    // The label pellets are coloured by. A label the reader picked sticks
+    // across layouts; otherwise a monitor colours by its own driver, and
+    // open keeps whatever was on screen, so toggling to it does not repaint
+    // every pellet as well as moving it.
+    const names = blastLabelNames(blast);
+    if (!names.length) return null;
+    if (chosen != null && names.includes(chosen)) return chosen;
+    if (layout && layout.driver != null && names.includes(layout.driver)) return layout.driver;
+    if (current != null && names.includes(current)) return current;
+    return names[0];
+  }
+
+  function blastPelletColour(pellet, name) {
+    const v = blastLabelValue(pellet && pellet.labels, name);
+    return v === 1 ? BLAST_COLOURS.one : v === 0 ? BLAST_COLOURS.zero : BLAST_COLOURS.none;
+  }
+
+  function blastDiscordant(pellet, colourLabel, driver) {
+    // true when the pellet carries both labels with different values, false
+    // when it carries both with the same value, null when it lacks either
+    const labels = pellet && pellet.labels;
+    const a = blastLabelValue(labels, colourLabel), b = blastLabelValue(labels, driver);
+    return a === null || b === null ? null : a !== b;
+  }
+
+  function blastRings(blast, colourLabel, driver) {
+    // Which pellets get a ring when colouring by a label that is not the
+    // layout's driver: those whose two labels break the pairing most pellets
+    // follow, because they are the ones that tell a monitor for one label
+    // from a monitor for the other. Where the labels mostly agree (refused
+    // with harmful) that is the pellets where they differ. Where they mostly
+    // differ (negation words sit on the true answers, false_claim = 0) it is
+    // the pellets where they match: ringing raw disagreement there would ring
+    // most of the family and single out nothing. A tie rings disagreement.
+    // {ringed: bool per pellet, count, text}, or null where nothing can be
+    // ringed (open has no driver; colouring by the driver itself).
+    if (!blast || colourLabel == null || driver == null || colourLabel === driver) return null;
+    const d = (blast.pellets || []).map((p) => blastDiscordant(p, colourLabel, driver));
+    const differ = d.filter((x) => x === true).length, match = d.filter((x) => x === false).length;
+    const ringMatch = match < differ;
+    return { ringed: d.map((x) => x !== null && x === !ringMatch),
+             count: ringMatch ? match : differ,
+             text: `ringed: ${colourLabel} ${ringMatch ? "=" : "≠"} ${driver}` };
+  }
+
+  function blastLegend(blast, layout, colourLabel) {
+    // {label, rows: [{value, text, colour, count}], ring: {text, count} | null}.
+    // A value reads as the data writes it ("harmful = 1", or "= true" where
+    // the file says true): the viewer does not know what a label means.
+    if (!blast || colourLabel == null) return null;
+    const raw = { 1: null, 0: null }, count = { 1: 0, 0: 0, none: 0 };
+    for (const p of blast.pellets || []) {
+      const v = blastLabelValue(p && p.labels, colourLabel);
+      if (v === null) count.none++;
+      else {
+        count[v]++;
+        if (raw[v] === null) raw[v] = String(p.labels[colourLabel]);
+      }
+    }
+    const rows = [
+      { value: 1, text: `${colourLabel} = ${raw[1] ?? "1"}`, colour: BLAST_COLOURS.one, count: count[1] },
+      { value: 0, text: `${colourLabel} = ${raw[0] ?? "0"}`, colour: BLAST_COLOURS.zero, count: count[0] },
+    ];
+    if (count.none) rows.push({ value: null, text: `no ${colourLabel} label`,
+                                colour: BLAST_COLOURS.none, count: count.none });
+    const rings = blastRings(blast, colourLabel, layout ? layout.driver : null);
+    return { label: colourLabel, rows, ring: rings && { text: rings.text, count: rings.count } };
+  }
+
+  function blastReadout(blast, layout, layer) {
+    // What the current layout reads at one layer, as {text, flag}; flag is a
+    // warning line or null. Numbers come from the record: nothing here is
+    // recomputed, so the viewer cannot report a different readout than the
+    // writer measured.
+    if (!blast || !layout || !Number.isInteger(layer) || layer < 0) return null;
+    const at = (a) => (a && a.data && layer < a.data.length ? a.data[layer] : undefined);
+    const arrays = layout.arrays || {};
+    if (layout.method === "monitor") {
+      const au = at(arrays.auroc);
+      if (au === undefined) return null;
+      // NaN is the writer's mark for a layer whose pellets are one point
+      if (!Number.isFinite(au)) return { text: "layer is one point: no direction", flag: null };
+      let text = `held-out AUROC ${au.toFixed(2)}`, flag = null;
+      const lo = at(arrays.null05), hi = at(arrays.null95);
+      if (Number.isFinite(lo) && Number.isFinite(hi)) {
+        text += ` · shuffle null 5–95%: ${lo.toFixed(2)}–${hi.toFixed(2)}`;
+        if (au < lo)
+          flag = "below the null band: check for near-duplicate or paired prompts across classes";
+        else if (au <= hi)
+          flag = "inside the null band: shuffled labels read this high too";
+      }
+      return { text, flag };
+    }
+    if (layout.method === "open") {
+      const spread = at(blast.spread);
+      if (spread !== undefined && !(spread > 0))
+        return { text: "layer is one point: every pellet sits at the origin", flag: null };
+      const shown = at(arrays.shown);
+      if (!Number.isFinite(shown)) return null;
+      return { text: `camera shows ${Math.round(shown * 100)}% of this layer's spread`, flag: null };
+    }
+    return null;
+  }
+
+  // Said once per caption whatever the layout: positions are per-layer
+  // deviations from that layer's own centroid in that layer's own unit, so
+  // the line a trail draws between two layers is not a distance in any one
+  // space.
+  const BLAST_FRAME_NOTE = "each layer has its own frame (its own centroid and unit), so a " +
+    "trail between layers connects positions in two different frames, not a path through one space";
+
+  function blastCaption(blast, layout) {
+    // [{kind, text}]: the layout's own exact / fitted / projected lines as the
+    // writer recorded them, the frame note, and why any label drew no monitor
+    if (!blast || !layout) return [];
+    const lines = [];
+    for (const kind of ["exact", "fitted", "projected"])
+      for (const text of layout[kind] || []) lines.push({ kind, text: String(text) });
+    lines.push({ kind: "frame", text: BLAST_FRAME_NOTE });
+    for (const text of blast.skipped || []) lines.push({ kind: "not drawn", text: String(text) });
+    return lines;
+  }
+
+  function truncateMiddle(s, max) {
+    // Long pellet text keeps both ends: a pellet is read at one position, by
+    // default its last token, so the end is the part the state was read at
+    // and cutting it off would hide exactly that.
+    const t = String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+    if (!(max > 8) || t.length <= max) return t;
+    const head = Math.ceil((max - 1) * 0.55), tail = max - 1 - head;
+    let a = t.slice(0, head), b = t.slice(t.length - tail);
+    // snap to a word boundary when one is close, so no word is half shown
+    const sa = a.lastIndexOf(" ");
+    if (sa > head * 0.7) a = a.slice(0, sa);
+    const sb = b.indexOf(" ");
+    if (sb >= 0 && sb < tail * 0.3) b = b.slice(sb + 1);
+    return `${a.trimEnd()} … ${b.trimStart()}`;
+  }
+
+  function blastPellet(blast, index, layer, maxText) {
+    // {id, text, labels: [[name, written value]], range} for the inspector;
+    // range is the pellet's exact full-space distance from the layer centroid
+    // (in that layer's mean state norms), or null where the record lacks it
+    const p = blast && blast.pellets ? blast.pellets[index] : null;
+    if (!p) return null;
+    let range = null;
+    const r = blast.range;
+    if (r && r.data && Array.isArray(r.shape) && r.shape.length === 2 &&
+        Number.isInteger(layer) && layer >= 0 && layer < r.shape[1]) {
+      const v = r.data[index * r.shape[1] + layer];
+      if (Number.isFinite(v)) range = v;
+    }
+    return {
+      id: p.id, text: truncateMiddle(p.text, maxText || 140),
+      labels: Object.keys(p.labels || {}).map((k) =>
+        [k, p.labels[k] === null || p.labels[k] === undefined ? "–" : String(p.labels[k])]),
+      range,
+    };
+  }
+
   return { parse, loadScene, decodeFloat16, SUPPORTED_VERSION,
            isGeneratedToken, generationStep, continuationText, decodeSummary,
            generationBoundary, featureAt, featureFitSummary,
-           neighborsAt, componentShareAt };
+           neighborsAt, componentShareAt,
+           BLAST_COLOURS, BLAST_FRAME_NOTE, blastLabelValue, blastLabelNames,
+           blastColourLabel, blastPelletColour, blastDiscordant, blastRings, blastLegend,
+           blastReadout, blastCaption, blastPellet, truncateMiddle };
 });

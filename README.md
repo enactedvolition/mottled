@@ -35,6 +35,8 @@ Hover anywhere along a trajectory for the inspector; click to pin it.
 | [`models-qwen-gpt2`](https://enactedvolition.github.io/mottled/viewer/?file=samples/models-qwen-gpt2.mtj) | two different models on one terrain |
 | [`gpt2-features`](https://enactedvolition.github.io/mottled/viewer/?file=samples/gpt2-features.mtj) | real SAE features, with their measured fit |
 | [`self-portrait`](https://enactedvolition.github.io/mottled/viewer/?file=samples/self-portrait.mtj) | Mottled pointed at itself (see below) |
+| [`blast/refusal`](https://enactedvolition.github.io/mottled/viewer/?file=samples/blast/refusal.mtj) | 48 requests, one pellet each: where harmful and harmless separate, layer by layer |
+| [`blast/truth`](https://enactedvolition.github.io/mottled/viewer/?file=samples/blast/truth.mtj) | true vs false answers, beside the negation readout that rivals it |
 
 The page can also **run a model itself**. Open *Run a model in this page*,
 pick one, and capture. The picker lists models checked to load completely,
@@ -57,6 +59,7 @@ mottled serve --model gpt2                 # web viewer + capture API
 mottled export "The capital of France is" -o scene.mtj
 mottled export "The residual stream" --generate 8 -o decode.mtj
 mottled export "The capital of France is" --models gpt2,distilgpt2 -o models.mtj
+mottled export-blast items.jsonl --model Qwen/Qwen2.5-0.5B-Instruct --chat -o blast.mtj
 mottled export-manifest scene.mtj          # what produced a scene, as JSON
 mottled parity                             # Mottled's capture vs HF, TL, NNsight
 mottled smoke                              # does this install actually work?
@@ -158,6 +161,33 @@ where it was trained.
   commit, device and dtype, SAE hashes, and each edit (a vector edit with
   its norm and a hash of its values). It is the parameterization a reproduction needs, not
   evidence that the run reproduces.
+
+## Many prompts at once: the shotgun blast
+
+A token-trajectory scene follows one prompt's tokens through one global
+projection, and on real captures that projection spends its axes on what you
+already know: which token, which layer. `mottled export-blast` takes a JSONL
+file of labelled prompts instead and makes each prompt one **pellet**, read
+where a deployed monitor would read it (the state before the model writes),
+with every layer framed around the family's centroid. Prompts that end on the
+same template token start as one point, so the picture is the spread.
+
+```json
+{"id": "h00", "text": "Explain how to …", "labels": {"harmful": 1, "refused": 1}}
+{"id": "q00t", "messages": [{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}],
+ "labels": {"false_claim": 0}, "group": "q00"}
+```
+
+The **monitor** layout puts on x the score a linear monitor for one label
+would give each pellet, cross-fitted so the split you see is held out, with
+its AUROC per layer next to a label-shuffle null band; the viewer toggles
+between a monitor per label and an unsupervised **open** layout, colours by
+any label, and rings the pellets whose labels disagree. A split is a readout
+of these prompts, not a mechanism, and the samples in
+[`viewer/samples/blast/`](viewer/samples/blast/README.md) show the confounds
+to look for: wording that differs between the classes, contrast pairs (hold
+them out together with `group`), and a surface feature, there negation, that
+reads as well as the label you meant.
 
 ## Where the states come from
 

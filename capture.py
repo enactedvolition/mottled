@@ -241,6 +241,7 @@ def capture(
     capture_attention: bool = False,
     capture_routing: bool = False,
     input_ids=None,
+    positions: list[int] | None = None,
 ) -> StateTrajectory:
     """Run a forward pass and capture the residual stream at every layer.
 
@@ -260,6 +261,14 @@ def capture(
     `capture_routing=True` records, for a sparse-MoE model, which experts each
     token was routed to per layer (`StateTrajectory.routing`). It refuses on a
     dense model rather than inventing a routing.
+
+    `positions` keeps only those token positions (negative counts from the
+    end), and runs the logit lens on them alone: the lens over every token
+    against a 150k vocabulary is most of a chat prompt's capture time, and a
+    reader of one position (`blast.pellets`) needs none of the rest. The
+    trajectory's T axis is then those positions, recorded in
+    meta["positions"]; the per-token-pair captures (components, attention,
+    routing) are refused with it rather than sliced.
     """
     _require_torch()
     return _run(model, prompt, tokenizer=tokenizer, top_k=top_k, device=device,
@@ -268,7 +277,8 @@ def capture(
                 capture_attention=capture_attention,
                 capture_routing=capture_routing,
                 input_ids=None if input_ids is None
-                else torch.as_tensor(input_ids).reshape(1, -1))
+                else torch.as_tensor(input_ids).reshape(1, -1),
+                positions=positions)
 
 
 def generate_and_capture(
@@ -375,7 +385,8 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
          capture_attention: bool = False,
          capture_routing: bool = False,
          input_ids: "torch.Tensor | None" = None,
-         logits_dtype: str = "float16") -> StateTrajectory:
+         logits_dtype: str = "float16",
+         positions: list[int] | None = None) -> StateTrajectory:
     """Forward pass (optionally intervened) -> StateTrajectory. Shared by
     capture(), intervene() and generate_and_capture().
 
@@ -387,6 +398,10 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
     array, but its rounding makes tiny KL steps and rank ties; `dose.py`
     asks for float32 so its smallest doses measure the model, not the cast.
     """
+    if positions is not None and (capture_components or capture_attention
+                                  or capture_routing):
+        raise ValueError("positions keeps a subset of tokens; components, attention "
+                         "and routing describe all of them and cannot be sliced to it")
     if isinstance(model, str):
         model, tokenizer = load_model(model, device=device, dtype=dtype)
     if tokenizer is None:
@@ -427,6 +442,17 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
         attention = torch.stack([a.float().mean(dim=1)[0] for a in out.attentions]).cpu().numpy()
 
     routing = _routing_from(out, model, capture_routing)
+
+    if positions is not None:
+        T = hidden.shape[1]
+        if not positions:
+            raise ValueError("positions is empty: name at least one token to keep")
+        if any(not -T <= p < T for p in positions):
+            raise ValueError(f"positions {positions} outside a {T}-token input")
+        positions = [p % T for p in positions]
+        hidden = hidden[:, positions]
+        tokens = [tokens[p] for p in positions]
+        extra_meta = {**(extra_meta or {}), "positions": positions}
 
     logits_t = logit_lens(hidden, cap.adapter)
     vocab = [_clean_token(t) for t in tokenizer.convert_ids_to_tokens(range(logits_t.shape[-1]))]

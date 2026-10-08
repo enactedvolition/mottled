@@ -182,7 +182,8 @@ const pointProg = gl ? makeProgram(
    void main() {
      float r = length(gl_PointCoord - 0.5);
      if (r > 0.5) discard;
-     vec3 c = (rim > 0.5 && r > 0.40) ? vec3(1.0) : vc.rgb;
+     if (rim > 1.5 && r < 0.34) discard;   // rim 2: a ring alone, in vc
+     vec3 c = (rim > 0.5 && rim < 1.5 && r > 0.40) ? vec3(1.0) : vc.rgb;
      o = vec4(c, vc.a * smoothstep(0.5, 0.45, r));
    }`) : null;
 
@@ -202,6 +203,9 @@ const state = {
   // froze (it survives the cursor moving away, until Escape or a click on
   // empty space). `pick` is whichever of the two the panel currently shows.
   pick: null, hover: null, pinned: null, pickPinned: false,
+  // blast scenes only: which layout is drawn, the label pellets are coloured
+  // by, and the label the reader picked (null until they pick one)
+  blast: null,
   cam: { theta: -2.2, phi: 0.65, dist: 10, target: [0, 0, 0] },
   mouse: null,
 };
@@ -301,9 +305,17 @@ function setTerrainColors(showUncertainty) {
   gl.bufferSubData(gl.ARRAY_BUFFER, 0, showUncertainty && ter.hasSE ? ter.seCol : ter.baseCol);
 }
 
-function buildRun(run, runIdx, colorBase, dashUnit) {
+// `look` (blast scenes only) overrides the palette: colour(j) is pellet j's
+// label colour, ring(j) whether its marble is ringed, and trail scales the
+// alpha of lines and layer dots so the marbles at the scrubbed layer read
+// over 25 layers of trails drawn in one plane.
+function buildRun(run, runIdx, colorBase, dashUnit, look) {
   const [N, L] = run.points.shape, pts = run.points.data;
   const alpha = runIdx === 0 ? 1.0 : OVERLAY_ALPHA;
+  const trail = look ? look.trail : 1;
+  // every GL object made here, so a rebuilt run can free the one it replaces
+  const owned = [];
+  const own = (v) => { owned.push(v.vao, ...Object.values(v.bufs)); return v; };
   const dash = DASH_CYCLE[runIdx % DASH_CYCLE.length];
   const patLen = dash ? dash.reduce((a, b) => a + b, 0) * dashUnit : 0;
   // decode boundary: trajectories j >= genFrom trace generated ("+") tokens
@@ -315,9 +327,9 @@ function buildRun(run, runIdx, colorBase, dashUnit) {
   const bvh = BVH.fromPoints(pts, N, L);
   const trajs = [], lineVerts = [], lineCols = [];
   for (let j = 0; j < N; j++) {
-    const rgb = hexRGB(PALETTE[(colorBase + j) % PALETTE.length]);
+    const rgb = hexRGB(look ? look.colour(j) : PALETTE[(colorBase + j) % PALETTE.length]);
     const generated = genFrom >= 0 && j >= genFrom;
-    const lineAlpha = generated ? alpha * GEN_ALPHA : alpha;
+    const lineAlpha = (generated ? alpha * GEN_ALPHA : alpha) * trail;
     const fine = catmullRom(pts.subarray(j * L * 3, (j + 1) * L * 3), L);
     const nFine = fine.length / 3 - 1;
     const emit = (x0, y0, z0, x1, y1, z1) => {
@@ -349,13 +361,13 @@ function buildRun(run, runIdx, colorBase, dashUnit) {
         done += chunk; dpos += chunk;
       }
     }
-    trajs.push({ fine, rgb, generated,
+    trajs.push({ fine, rgb, generated, ring: !!(look && look.ring(j)),
                  label: (generated ? "+" : "") +
                         (run.trajectoryLabels[j] != null ? String(run.trajectoryLabels[j]) : `#${j}`) });
   }
   const linePos = new Float32Array(lineVerts), lineCol = new Float32Array(lineCols);
-  const lineVao = makeVAO(lineProg, [{ name: "pos", size: 3, data: linePos },
-                                     { name: "col", size: 4, data: lineCol }]);
+  const lineVao = own(makeVAO(lineProg, [{ name: "pos", size: 3, data: linePos },
+                                         { name: "col", size: 4, data: lineCol }]));
   // small dot at every stored layer point (the "markers" of the reference);
   // decoded-token trajectories get a rimmed (open) dot — the viewer's version
   // of the explorer's open-diamond markers for the decode axis
@@ -364,14 +376,14 @@ function buildRun(run, runIdx, colorBase, dashUnit) {
     const d = trajs[j].generated ? dotSets.gen : dotSets.base;
     const o = (j * L + l) * 3;
     d.pos.push(pts[o], pts[o + 1], pts[o + 2]);
-    d.col.push(trajs[j].rgb[0], trajs[j].rgb[1], trajs[j].rgb[2], alpha);
+    d.col.push(trajs[j].rgb[0], trajs[j].rgb[1], trajs[j].rgb[2], alpha * trail);
     d.size.push(trajs[j].generated ? 6 : 5);
   }
-  const mkDots = (d) => d.pos.length ? makeVAO(pointProg, [
+  const mkDots = (d) => d.pos.length ? own(makeVAO(pointProg, [
     { name: "pos", size: 3, data: new Float32Array(d.pos) },
     { name: "col", size: 4, data: new Float32Array(d.col) },
-    { name: "size", size: 1, data: new Float32Array(d.size) }]).vao : null;
-  return { run, N, L, trajs, alpha, bvh,
+    { name: "size", size: 1, data: new Float32Array(d.size) }])).vao : null;
+  return { run, N, L, trajs, alpha, bvh, owned,
            lineVao: lineVao.vao, lineCount: linePos.length / 3,
            dotVao: mkDots(dotSets.base), dotCount: dotSets.base.size.length,
            genDotVao: mkDots(dotSets.gen), genDotCount: dotSets.gen.size.length };
@@ -403,6 +415,10 @@ function setScene(scene) {
   ui.infoPanel.hidden = true;
   ui.infoPanel.classList.remove("pinned");
   state.visible = scene.runs.map(() => true);
+  // A blast opens at its deepest layer: at layer 0 the pellets can all be one
+  // point, and the spread with depth is what the scene is for.
+  state.blast = scene.blast ? { layout: 0, colour: null, chosen: null, shownLayer: -1 } : null;
+  if (state.blast) { state.layerF = state.L - 1; applyBlastLayout(); }
 
   // Real-model scenes span hundreds of units in x/y while terrain height is
   // normalized 0..1 — relief flattens into invisibility and marbles sink
@@ -430,12 +446,12 @@ function setScene(scene) {
   const dashUnit = spanXY / 500;  // world-unit length of one dash-pattern tick
   let colorBase = 0, totalTrajs = 0, maxAttn = 0;
   scene.runs.forEach((run, i) => {
-    state.runs.push(buildRun(run, i, colorBase, dashUnit));
+    state.runs.push(buildRun(run, i, colorBase, dashUnit, i === 0 ? blastLook() : null));
     colorBase += run.points.shape[0];
     totalTrajs += run.points.shape[0];
     if (run.attention) maxAttn += run.attention.shape[1] * 3 * 2;
   });
-  ensureDynPoints(totalTrajs + 1);
+  ensureDynPoints(2 * totalTrajs + 1);  // marbles, the pick, a ring per marble at most
   ensureAttnBuf(Math.max(maxAttn, 2));
 
   // bounds: terrain footprint + trajectory extents
@@ -465,9 +481,13 @@ function setScene(scene) {
   const target = [(tlo[0] + thi[0]) / 2, (tlo[1] + thi[1]) / 2, (tlo[2] + thi[2]) / 2];
   state.cam = { theta: -2.35, phi: 0.55, dist: Math.min(diag * 1.05, tdiag * 1.7), target };
   state.diag = diag;
-  state.zEps = (state.terrain.zmax - state.terrain.zmin) * 0.05 || 0.02;
+  // a blast's terrain is flat, so this would fall back to a fixed lift that
+  // floats each marble visibly off its own trail; its run already sits just
+  // above the plane
+  state.zEps = state.blast ? 0 : (state.terrain.zmax - state.terrain.zmin) * 0.05 || 0.02;
 
   buildUI(scene);
+  if (state.blast) frameBlast();  // after buildUI: it fits the pellets around the panels
   rebuildAttention();
   hideMessage();
 }
@@ -523,7 +543,7 @@ function marblePositions() {
         p: [t.fine[i0 * 3] + (t.fine[i1 * 3] - t.fine[i0 * 3]) * fr,
             t.fine[i0 * 3 + 1] + (t.fine[i1 * 3 + 1] - t.fine[i0 * 3 + 1]) * fr,
             t.fine[i0 * 3 + 2] + (t.fine[i1 * 3 + 2] - t.fine[i0 * 3 + 2]) * fr + state.zEps],
-        rgb: t.rgb, alpha: rd.alpha,
+        rgb: t.rgb, alpha: rd.alpha, ring: t.ring,
       });
     }
   });
@@ -552,18 +572,25 @@ function frame(now) {
   const mvp = currentMVP();
   gl.enable(gl.DEPTH_TEST);
 
-  gl.useProgram(meshProg);
-  gl.uniformMatrix4fv(gl.getUniformLocation(meshProg, "mvp"), false, mvp);
-  gl.bindVertexArray(state.terrain.vao);
-  gl.drawElements(gl.TRIANGLES, state.terrain.count, gl.UNSIGNED_INT, 0);
+  // A blast's terrain is the writer's flat 2 x 2 stand-in for viewers that
+  // predate the record. Drawn, it is a slab whose edges cut across the
+  // pellets and whose surface means nothing, so a blast skips it.
+  if (!state.blast) {
+    gl.useProgram(meshProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(meshProg, "mvp"), false, mvp);
+    gl.bindVertexArray(state.terrain.vao);
+    gl.drawElements(gl.TRIANGLES, state.terrain.count, gl.UNSIGNED_INT, 0);
+  }
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.depthMask(false);
   gl.useProgram(lineProg);
   gl.uniformMatrix4fv(gl.getUniformLocation(lineProg, "mvp"), false, mvp);
-  gl.bindVertexArray(state.terrain.wireVao);
-  gl.drawArrays(gl.LINES, 0, state.terrain.wireCount);
+  if (!state.blast) {
+    gl.bindVertexArray(state.terrain.wireVao);
+    gl.drawArrays(gl.LINES, 0, state.terrain.wireCount);
+  }
   state.runs.forEach((rd, i) => {
     if (!state.visible[i]) return;
     gl.bindVertexArray(rd.lineVao);
@@ -604,6 +631,14 @@ function frame(now) {
     pos.set([pick.p[0], pick.p[1], pick.p[2] + state.zEps], n * 3);
     col.set([...pick.rgb, 1], n * 4); size[n] = 17 * dpr; n++;
   }
+  // rings (blast scenes: pellets whose labels break the pairing most pellets
+  // follow, MTJ.blastRings) go after the marbles and the pick, and draw in a
+  // pass of their own, so they sit on top
+  const ringFrom = n;
+  for (const m of marbles) {
+    if (!m.ring) continue;
+    pos.set(m.p, n * 3); col.set([...RING_RGB, 1], n * 4); size[n] = 23 * dpr; n++;
+  }
   gl.bindBuffer(gl.ARRAY_BUFFER, dynPoints.bufs.pos); gl.bufferSubData(gl.ARRAY_BUFFER, 0, pos);
   gl.bindBuffer(gl.ARRAY_BUFFER, dynPoints.bufs.col); gl.bufferSubData(gl.ARRAY_BUFFER, 0, col);
   gl.bindBuffer(gl.ARRAY_BUFFER, dynPoints.bufs.size); gl.bufferSubData(gl.ARRAY_BUFFER, 0, size);
@@ -613,7 +648,11 @@ function frame(now) {
   // into a half-dome (the Plotly reference draws markers on top as well).
   gl.disable(gl.DEPTH_TEST);
   gl.bindVertexArray(dynPoints.vao);
-  gl.drawArrays(gl.POINTS, 0, n);
+  gl.drawArrays(gl.POINTS, 0, ringFrom);
+  if (n > ringFrom) {
+    gl.uniform1f(rimLoc, 2);
+    gl.drawArrays(gl.POINTS, ringFrom, n - ringFrom);
+  }
   gl.enable(gl.DEPTH_TEST);
 
   gl.depthMask(true);
@@ -664,10 +703,39 @@ function hitToPick(hit, rd, runIdx, multi) {
            rgb: t.rgb, label: (multi ? rd.run.label + " · " : "") + t.label };
 }
 
+// In a blast every trail lies in one plane, so the trail nearest the camera
+// under the cursor is arbitrary: it was often another pellet's, at another
+// layer, rather than the marble drawn on top. The marbles at the current
+// layer are what a reader points at, so they are tried first.
+const MARBLE_PICK_PX = 10;
+function blastMarblePick(mvp, w, h) {
+  const rd = state.runs[0];
+  if (!rd || !state.visible[0]) return null;
+  const f = state.layerF * SEG;
+  let best = null, bestD = MARBLE_PICK_PX;
+  rd.trajs.forEach((t, j) => {
+    const n = t.fine.length / 3;
+    const i0 = Math.min(Math.floor(f), n - 1), i1 = Math.min(i0 + 1, n - 1), fr = f - Math.floor(f);
+    const p = [0, 1, 2].map((a) => t.fine[i0 * 3 + a] + (t.fine[i1 * 3 + a] - t.fine[i0 * 3 + a]) * fr);
+    const s = projectPoint(mvp, p, w, h);
+    if (!s || s[2] <= 0) return;
+    const d = Math.hypot(s[0] - state.mouse[0], s[1] - state.mouse[1]);
+    if (d < bestD) { bestD = d; best = { j, p }; }
+  });
+  if (!best) return null;
+  const t = rd.trajs[best.j];
+  return { runIdx: 0, traj: best.j, layer: Math.min(rd.L - 1, Math.round(state.layerF)),
+           layerFrac: state.layerF, p: best.p, rgb: t.rgb, label: t.label };
+}
+
 // The reading under the cursor right now, or null.
 function hoverPick(mvp) {
   if (!state.mouse || !state.scene) return null;
   const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (state.blast) {
+    const marble = blastMarblePick(mvp, w, h);
+    if (marble) return marble;
+  }
   const ray = cameraRay(mvp, state.mouse[0], state.mouse[1], w, h);
   if (!ray) return null;
   const radius = pickRadiusWorld(h), multi = state.scene.runs.length > 1;
@@ -710,8 +778,21 @@ function setPickInfo(pick, pinned) {
   // readouts below still key off the nearer integer layer
   const lf = pick.layerFrac;
   const between = typeof lf === "number" && Math.abs(lf - pick.layer) >= 0.05;
-  let html = `<div class="ip-title">${esc(pick.label)}</div>` +
-             `<div>layer <b>${between ? lf.toFixed(1) : pick.layer}</b> · token <span class="mono">'${esc((genTok ? "+" : "") + (run.tokens[tok] ?? "?"))}'</span></div>`;
+  const layerHtml = `layer <b>${between ? lf.toFixed(1) : pick.layer}</b>`;
+  let html = `<div class="ip-title">${esc(pick.label)}</div>`;
+  const pellet = state.scene.blast && pick.runIdx === 0
+    ? MTJ.blastPellet(state.scene.blast, pick.traj, pick.layer, 140) : null;
+  if (pellet) {
+    // a pellet is a prompt, not a token: its text, labels and exact distance
+    // from this layer's centroid stand where the token line would
+    html += `<div>${layerHtml}</div><div class="ip-text">${esc(pellet.text)}</div>` +
+            `<div class="mono">${pellet.labels.map(([k, v]) => `${esc(k)} ${esc(v)}`).join(" · ")}</div>`;
+    if (pellet.range !== null)
+      html += `<div>range <b>${pellet.range.toFixed(3)}</b><span class="dim"> exact, ` +
+              `from this layer's centroid in mean state norms</span></div>`;
+  } else {
+    html += `<div>${layerHtml} · token <span class="mono">'${esc((genTok ? "+" : "") + (run.tokens[tok] ?? "?"))}'</span></div>`;
+  }
   const step = genTok ? MTJ.generationStep(run.generation, tok) : null;
   if (step) {
     const bits = [];
@@ -808,6 +889,15 @@ const ui = {
   layerLabel: document.getElementById("layerLabel"),
   openBtn: document.getElementById("openBtn"),
   fileInput: document.getElementById("fileInput"),
+  hudTop: document.getElementById("hud-top"),
+  runsHead: document.getElementById("runs-head"),
+  blastPanel: document.getElementById("blast-panel"),
+  blastLayouts: document.getElementById("blastLayouts"),
+  blastColour: document.getElementById("blastColour"),
+  blastLegend: document.getElementById("blastLegend"),
+  blastReadout: document.getElementById("blastReadout"),
+  blastCaption: document.getElementById("blastCaption"),
+  blastCaptionBody: document.getElementById("blastCaptionBody"),
 };
 
 function showMessage(msg, isError) {
@@ -824,7 +914,7 @@ function buildUI(scene) {
   ui.runsPanel.hidden = false;
   ui.hudBottom.hidden = false;
   ui.layerSlider.max = state.L - 1;
-  ui.layerSlider.value = 0;
+  ui.layerSlider.value = state.layerF;
   onLayerChanged(false);
 
   ui.runsList.innerHTML = "";
@@ -884,6 +974,10 @@ function buildUI(scene) {
   ui.uncertaintyToggle.checked = state.showUncertainty = hasSE;
   setTerrainColors(state.showUncertainty);
 
+  // the caption is how a blast is read, so it starts open where there is
+  // room for it; on a phone it would bury the scene
+  if (scene.blast) ui.blastCaption.open = !window.matchMedia("(max-width: 720px)").matches;
+  renderBlastPanel();
   renderReading(scene);
 }
 
@@ -891,7 +985,7 @@ function buildUI(scene) {
  * survived the projection, what the terrain does and does not mean, and what
  * produced it. Collapsed by default — it is the answer to a question the
  * reader has, not a wall between them and the picture. */
-function renderReading(scene) {
+function renderReading(scene, keepOpen) {
   const R = window.Reading;
   if (!R) { ui.readingPanel.hidden = true; return; }
   const summary = R.sceneSummary(scene);
@@ -902,9 +996,19 @@ function renderReading(scene) {
     const low = summary.fidelity.low_fraction > 0.25 ? " warn" : "";
     rows.push(`<p class="reading-fidelity${low}">${esc(fidelity)}</p>`);
   }
-  rows.push(`<p>${esc(R.uncertaintyNote(summary.hasUncertainty))}</p>`);
-  for (const [heading, body] of R.NOTES)
-    rows.push(`<p><b>${esc(heading)}.</b> ${esc(body)}</p>`);
+  if (scene.blast) {
+    // A blast has no density terrain, so the terrain note and the
+    // density-uncertainty line would describe something the scene does not
+    // have. The fidelity line above is the current layout's.
+    for (const [heading, body] of BLAST_NOTES)
+      rows.push(`<p><b>${esc(heading)}.</b> ${esc(body)}</p>`);
+    for (const [heading, body] of R.NOTES)
+      if (!/terrain/i.test(heading)) rows.push(`<p><b>${esc(heading)}.</b> ${esc(body)}</p>`);
+  } else {
+    rows.push(`<p>${esc(R.uncertaintyNote(summary.hasUncertainty))}</p>`);
+    for (const [heading, body] of R.NOTES)
+      rows.push(`<p><b>${esc(heading)}.</b> ${esc(body)}</p>`);
+  }
 
   const p = summary.provenance;
   if (p) {
@@ -930,16 +1034,184 @@ function renderReading(scene) {
 
   ui.readingBody.innerHTML = rows.join("");
   ui.readingPanel.hidden = false;
-  ui.readingPanel.open = false;
+  if (!keepOpen) ui.readingPanel.open = false;
 }
 
 const fmt = (v) => (typeof v === "number" ? v.toFixed(3) : "–");
+
+// ---------------------------------------------------------------- blast
+// A blast scene (blast.py) is one pellet per prompt, drawn flat under one of
+// several layouts. Run 0 holds the first layout; switching rewrites its x, y
+// in place (z keeps the writer's small lift) and rebuilds everything derived
+// from those points. What a colour, a ring or a readout says is decided by
+// the MTJ.blast* helpers, which node --test pins; this section only draws.
+const BLAST_TRAIL = 0.4;   // trail alpha; the marbles at the scrubbed layer stay at 1
+const RING_RGB = hexRGB(MTJ.BLAST_COLOURS.ring);
+
+// docs/validity.md's own wording for a blast monitor split
+const BLAST_NOTES = [
+  ["No terrain",
+   "A blast scene estimates no density, so there is no height to read and no " +
+   "density uncertainty to show."],
+  ["What a split is",
+   "A split under a monitor layout means these labelled prompts are linearly " +
+   "separable, held out, at that layer. Not what the model computes, " +
+   "and not yet a monitor: check wording, contrast pairs and surface features " +
+   "first, then confirm on held-out prompts."],
+];
+
+function blastLayout() {
+  return state.scene.blast.layouts[state.blast.layout];
+}
+
+function applyBlastLayout() {
+  const run = state.scene.runs[0], lay = blastLayout();
+  const p = run.points.data, q = lay.positions.data;
+  // positions (N, L, 2) and points (N, L, 3) share their pellet-major order
+  for (let i = 0, n = q.length / 2; i < n; i++) {
+    p[i * 3] = q[i * 2]; p[i * 3 + 1] = q[i * 2 + 1];
+  }
+  // the inspector's nbhd line and the reading panel's fidelity are this layout's
+  run.quality = lay.quality;
+  state.blast.colour = MTJ.blastColourLabel(state.scene.blast, lay,
+                                            state.blast.chosen, state.blast.colour);
+}
+
+function blastLook() {
+  const b = state.scene.blast;
+  if (!b || !state.blast) return null;
+  const name = state.blast.colour;
+  const rings = MTJ.blastRings(b, name, blastLayout().driver);
+  return { colour: (j) => MTJ.blastPelletColour(b.pellets[j], name),
+           ring: (j) => !!(rings && rings.ringed[j]), trail: BLAST_TRAIL };
+}
+
+function rebuildBlastRun() {
+  for (const o of state.runs[0].owned)
+    if (o instanceof WebGLVertexArrayObject) gl.deleteVertexArray(o); else gl.deleteBuffer(o);
+  state.runs[0] = buildRun(state.scene.runs[0], 0, 0, 1, blastLook());
+  // a pin follows its pellet into the new layout instead of floating where
+  // the old one drew it; clearing state.pick makes the panel re-read it
+  if (state.pinned) {
+    const t = state.runs[0].trajs[state.pinned.traj];
+    state.pinned = { ...state.pinned, p: finePoint(t.fine, state.pinned.layerFrac), rgb: t.rgb };
+  }
+  state.pick = null;
+}
+
+// The part of the canvas no panel covers. Each panel cuts the free rectangle
+// from whichever side keeps the most of it — the loader from the top, the
+// desktop pellet panel from the right, the phone one from the bottom — so
+// the framing follows the CSS layout without restating its breakpoints.
+function freeRect() {
+  let f = { l: 0, t: 0, r: canvas.clientWidth, b: canvas.clientHeight };
+  const area = (c) => Math.max(0, c.r - c.l) * Math.max(0, c.b - c.t);
+  for (const el of [ui.hudTop, ui.runsPanel, ui.hudBottom]) {
+    if (el.hidden) continue;
+    const r = el.getBoundingClientRect();
+    if (r.right <= f.l || r.left >= f.r || r.bottom <= f.t || r.top >= f.b) continue;
+    f = [{ ...f, t: r.bottom }, { ...f, b: r.top }, { ...f, l: r.right }, { ...f, r: r.left }]
+      .reduce((a, c) => (area(c) > area(a) ? c : a));
+  }
+  return f;
+}
+
+// A blast is drawn flat (x, y per layer and a hair of z), so it is read from
+// above: theta -pi/2 puts +x to the right and +y up, and the distance fits
+// the pellets' footprint into the free part of the canvas, not a 3-D
+// diagonal into all of it.
+function frameBlast() {
+  const p = state.scene.runs[0].points.data;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < p.length; i += 3) {
+    x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]);
+    y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]);
+  }
+  const W = Math.max(canvas.clientWidth, 1), H = Math.max(canvas.clientHeight, 1);
+  let f = freeRect();
+  if (f.r - f.l < 80 || f.b - f.t < 80) f = { l: 0, t: 0, r: W, b: H };
+  const hx = Math.max((x1 - x0) / 2, 1e-6), hy = Math.max((y1 - y0) / 2, 1e-6);
+  const s = Math.min((f.r - f.l) / (2 * hx), (f.b - f.t) / (2 * hy)) / 1.15; // px per unit
+  // offset the orbit target so the pellets centre in the free rectangle
+  state.cam = { theta: -Math.PI / 2, phi: 1.45, dist: H / (2 * s * Math.tan(FOVY / 2)),
+                target: [(x0 + x1) / 2 - ((f.l + f.r) / 2 - W / 2) / s,
+                         (y0 + y1) / 2 + ((f.t + f.b) / 2 - H / 2) / s, 0] };
+  state.diag = Math.hypot(x1 - x0, y1 - y0) || 1;
+}
+
+function setBlastLayout(k) {
+  state.blast.layout = k;
+  applyBlastLayout();
+  rebuildBlastRun();
+  renderBlastPanel();
+  frameBlast();
+  renderReading(state.scene, true);
+}
+
+function setBlastColour(name) {
+  state.blast.chosen = state.blast.colour = name;
+  rebuildBlastRun();
+  renderBlastPanel();
+}
+
+// The pellet panel takes the runs panel's place: one run of N pellets has
+// nothing to toggle, and the layout, colouring and caption are what a blast
+// is read by.
+function renderBlastPanel() {
+  const b = state.scene && state.scene.blast;
+  ui.runsPanel.classList.toggle("blast", !!b);
+  ui.blastPanel.hidden = !b;
+  ui.runsList.hidden = !!b;
+  ui.runsHead.textContent = b ? `${b.pellets.length} pellets` : "runs";
+  if (!b) return;
+  const lay = blastLayout();
+  ui.blastLayouts.innerHTML = "";
+  b.layouts.forEach((l, k) => {
+    const btn = document.createElement("button");
+    btn.className = "seg-btn";
+    btn.textContent = l.name;
+    btn.setAttribute("aria-pressed", String(k === state.blast.layout));
+    btn.addEventListener("click", () => { if (k !== state.blast.layout) setBlastLayout(k); });
+    ui.blastLayouts.appendChild(btn);
+  });
+  const names = MTJ.blastLabelNames(b);
+  // a family without labels has nothing to colour by
+  ui.blastColour.closest(".blast-colour").hidden = !names.length;
+  ui.blastColour.innerHTML = names
+    .map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  ui.blastColour.value = state.blast.colour;
+  const lg = MTJ.blastLegend(b, lay, state.blast.colour);
+  ui.blastLegend.innerHTML = !lg ? "" : lg.rows.map((r) =>
+    `<span class="lg"><span class="blast-swatch" style="background:${r.colour}"></span>` +
+    `${esc(r.text)} <span class="dim">(${r.count})</span></span>`).join("") +
+    (lg.ring ? `<span class="lg"><span class="blast-swatch ring"></span>${esc(lg.ring.text)} ` +
+               `<span class="dim">(${lg.ring.count})</span></span>` : "");
+  ui.blastCaptionBody.innerHTML = MTJ.blastCaption(b, lay).map((c) =>
+    `<p><span class="cap-kind">${esc(c.kind)}</span> ${esc(c.text)}</p>`).join("");
+  renderBlastReadout();
+}
+
+// the readout at the scrubbed layer; onLayerChanged calls this only when the
+// integer layer changes, so playback does not rewrite the DOM every frame
+function renderBlastReadout() {
+  const l = Math.floor(state.layerF);
+  state.blast.shownLayer = l;
+  const r = MTJ.blastReadout(state.scene.blast, blastLayout(), l);
+  // each " · " part is kept whole, so a narrow panel breaks the line between
+  // the AUROC and its null band rather than inside "5–95%"
+  const parts = r ? r.text.split(" \u00b7 ").map((t) => `<span class="part">${esc(t)}</span>`) : [];
+  ui.blastReadout.innerHTML = `<span class="part dim">layer ${l}</span> ` +
+    (r ? parts.join(' <span class="dim">\u00b7</span> ')
+       : `<span class="dim">no readout recorded</span>`) +
+    (r && r.flag ? `<div class="blast-flag">${esc(r.flag)}</div>` : "");
+}
 
 function onLayerChanged(fromSlider) {
   if (fromSlider) state.layerF = parseFloat(ui.layerSlider.value);
   const l = Math.floor(state.layerF);
   ui.layerLabel.textContent = `layer ${l} / ${state.L - 1}`;
   if (l !== state._lastAttnLayer) { state._lastAttnLayer = l; rebuildAttention(); }
+  if (state.blast && l !== state.blast.shownLayer) renderBlastReadout();
 }
 
 ui.layerSlider.addEventListener("input", () => { state.playing = false; ui.playBtn.innerHTML = "&#9654;"; onLayerChanged(true); });
@@ -953,6 +1225,7 @@ ui.uncertaintyToggle.addEventListener("change", () => {
   state.showUncertainty = ui.uncertaintyToggle.checked;
   setTerrainColors(state.showUncertainty);
 });
+ui.blastColour.addEventListener("change", () => setBlastColour(ui.blastColour.value));
 ui.openBtn.addEventListener("click", () => ui.fileInput.click());
 ui.fileInput.addEventListener("change", () => {
   if (ui.fileInput.files[0]) loadBlob(ui.fileInput.files[0], ui.fileInput.files[0].name);

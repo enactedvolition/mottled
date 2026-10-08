@@ -30,6 +30,7 @@ Running the tool:
 mottled                              # Streamlit explorer (ui.py)
 mottled serve --model gpt2           # stdlib server: viewer + capture API
 mottled export "a prompt" -o s.mtj   # capture -> scene file
+mottled export-blast items.jsonl     # one pellet per prompt -> blast scene
 mottled export-manifest s.mtj        # the analysis record the scene carries
 mottled parity                       # capture vs HF/TransformerLens/NNsight
 mottled smoke                        # does this install work? (see RELEASING.md)

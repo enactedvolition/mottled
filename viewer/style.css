@@ -273,3 +273,67 @@ button:active { transform: translateY(1px); }
 .reading-fidelity { color: var(--color-fg-1); }
 .reading-fidelity.warn { color: var(--color-amber); }
 .reading-prov { border-top: 1px solid var(--color-border); padding-top: 8px; }
+
+/* ---- blast scenes: one pellet per prompt ------------------------------
+   The pellet panel takes the runs list's place. Layouts are a segmented
+   toggle because switching between them is the comparison a blast is read
+   by; pellets are drawn as discs, so the legend's swatches are discs too.
+   Every colour here is an existing token: the pellet colours themselves are
+   MTJ.BLAST_COLOURS, which viewer/tests/blast.test.js holds to this file. */
+/* 340px fits three layout names on one row ("monitor · false_claim" is the
+   longest the samples have) */
+#runs-panel.blast { max-width: 340px; max-height: calc(100vh - 150px); overflow-y: auto; }
+/* opened, the reading panel rises over the pellet panel; at the same width
+   their edges line up instead of the caption showing down one side */
+#runs-panel.blast ~ #reading-panel { max-width: 340px; }
+#blast-panel { font-size: 12px; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.seg-btn { padding: 3px 8px; font-size: 12px; color: var(--color-fg-2); }
+.seg-btn[aria-pressed="true"] { color: var(--color-fg-1);
+  border-color: var(--color-accent); background: var(--color-accent-subtle); }
+.blast-colour { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.blast-colour[hidden] { display: none; }   /* the flex above would override hidden */
+.blast-colour select { padding: 2px 6px; }
+#blastLegend { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11px;
+  margin-bottom: 8px; }
+#blastLegend .lg { white-space: nowrap; }
+.blast-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 5px; vertical-align: baseline; }
+.blast-swatch.ring { background: none; width: 11px; height: 11px;
+  border: 2px solid var(--color-fg-1); vertical-align: -1px; }
+#blastReadout { font-size: 11px; line-height: 1.5; padding-top: 6px;
+  border-top: 1px solid var(--color-border); }
+#blastReadout .part { white-space: nowrap; }
+/* blast scenes carry no attention, and #attn-row's display: block outranks
+   the hidden attribute buildUI sets, so the empty toggle is hidden here */
+#runs-panel.blast #attn-row { display: none; }
+/* a readout that does not clear its shuffle null warns in the same amber
+   the scene panel flags low fidelity with */
+.blast-flag { color: var(--color-amber); margin-top: 2px;
+  font-family: "DM Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+#blastCaption { margin-top: 8px; font-size: 11px; line-height: 1.5;
+  color: var(--color-fg-2); }
+#blastCaption > summary { cursor: pointer; color: var(--color-fg-1); }
+#blastCaption[open] > summary { margin-bottom: 4px; }
+#blastCaptionBody p { margin: 0 0 5px; }
+.cap-kind { color: var(--color-fg-1); text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 9.5px; margin-right: 3px; }
+#info-panel .ip-text { color: var(--color-fg-2); margin: 2px 0; }
+
+@media (max-width: 720px) {
+  /* Bottom of the screen like the runs panel, but taller, so the readout
+     line shows without scrolling (the caption starts collapsed), and a fixed
+     height so "Reading this scene" can sit on its header row instead of over
+     its controls. */
+  /* bottom clears the scrubber, which its 44px touch targets make 62px tall */
+  #runs-panel.blast { max-width: none; height: 38vh; max-height: none; bottom: 74px; }
+  #runs-panel.blast ~ #reading-panel { bottom: calc(74px + 38vh - 40px); right: 14px;
+    padding: 6px 10px; }
+  /* The shared #hud-bottom rule's translateX(-50%) survives into the phone
+     layout and pushes the scrubber half off-screen. Scoped to blast scenes
+     so other scenes stay exactly as they were; the general fix is this line
+     in the phone #hud-bottom rule above. */
+  #runs-panel.blast ~ #hud-bottom { transform: none; width: auto; }
+  .seg-btn { padding: 6px 9px; }        /* the 44px floor still applies */
+  #blastCaption > summary { padding: 8px 0; }
+}
