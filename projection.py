@@ -48,6 +48,16 @@ class PCAProjection:
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
         out = self._pca.fit_transform(np.asarray(X, dtype=np.float64))
+        # Pin the component signs instead of inheriting scikit-learn's, which
+        # changed in 1.5 (from U-based to V-based `svd_flip`): each
+        # component's largest-|.| entry is positive. A no-op on >= 1.5; it
+        # keeps the reference — and viewer/scene.js, which mirrors it — from
+        # flipping with the installed version.
+        comps = self._pca.components_
+        signs = np.sign(comps[np.arange(len(comps)), np.abs(comps).argmax(axis=1)])
+        signs[signs == 0] = 1
+        comps *= signs[:, None]
+        out *= signs
         self.fitted = True
         return out.astype(np.float32)
 

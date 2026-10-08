@@ -120,40 +120,38 @@
     let totalVar = 0;
     for (let i = 0; i < n; i++) totalVar += G[i * n + i];
 
-    /* Scores are U * s, i.e. the eigenvectors of G scaled by the singular
-     * values. Sign is fixed exactly as scikit-learn's `svd_flip` does with
-     * `u_based_decision=True`: for each component, the entry of U with the
-     * largest magnitude is made positive (first index wins ties, matching
-     * np.argmax). Without this a JS-built scene could come out mirrored
-     * relative to a Python-built one. */
-    const scores = new Float64Array(n * k);
-    const signs = new Float64Array(k);
-    const sv = new Float64Array(k);
-    for (let c = 0; c < k; c++) {
-      const lambda = Math.max(values[c], 0);
-      const s = Math.sqrt(lambda);
-      sv[c] = s;
-      let best = 0, bestAbs = -1;
-      for (let i = 0; i < n; i++) {
-        const a = Math.abs(vectors[i * n + c]);
-        if (a > bestAbs) { bestAbs = a; best = i; }
-      }
-      const sign = Math.sign(vectors[best * n + c]) || 1;
-      signs[c] = sign;
-      for (let i = 0; i < n; i++) scores[i * k + c] = vectors[i * n + c] * s * sign;
-    }
-
     // Component vectors in hidden space: V = Xc^T U / s (D x k, column-major
     // by component). Needed for transform/inverse_transform and the PCA
-    // residual that `projection_quality` reports.
+    // residual that `projection_quality` reports — and, first, for the sign.
+    const sv = new Float64Array(k);
     const components = new Float64Array(k * d);
     for (let c = 0; c < k; c++) {
+      sv[c] = Math.sqrt(Math.max(values[c], 0));
       if (sv[c] <= 1e-12) continue;
       for (let j = 0; j < d; j++) {
         let acc = 0;
         for (let i = 0; i < n; i++) acc += Xc[i * d + j] * vectors[i * n + c];
-        components[c * d + j] = (acc / sv[c]) * signs[c];
+        components[c * d + j] = acc / sv[c];
       }
+    }
+
+    /* Sign is fixed as `projection.PCAProjection` pins it, which is
+     * scikit-learn >= 1.5's `svd_flip(u_based_decision=False)`: for each
+     * component, the entry of V with the largest magnitude is made positive
+     * (first index wins ties, matching np.argmax). This once followed U, as
+     * scikit-learn < 1.5 did, and browser-built scenes came out mirrored
+     * against Python-built ones on most inputs. Scores are U * s, flipped
+     * with their component. */
+    const scores = new Float64Array(n * k);
+    for (let c = 0; c < k; c++) {
+      let best = 0, bestAbs = -1;
+      for (let j = 0; j < d; j++) {
+        const a = Math.abs(components[c * d + j]);
+        if (a > bestAbs) { bestAbs = a; best = j; }
+      }
+      const sign = Math.sign(components[c * d + best]) || 1;
+      for (let j = 0; j < d; j++) components[c * d + j] *= sign;
+      for (let i = 0; i < n; i++) scores[i * k + c] = vectors[i * n + c] * sv[c] * sign;
     }
 
     let kept = 0;
