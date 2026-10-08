@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Browser-built scenes are no longer mirrored
+- `viewer/scene.js` fixed PCA signs the way scikit-learn < 1.5 did (U-based
+  `svd_flip`); scikit-learn 1.5 switched to V-based, so a scene built in the
+  browser came out mirrored on one or both axes against the Python-built one
+  on 12 of 20 test inputs. Both sides now use the V-based rule, and
+  `projection.PCAProjection` pins it instead of inheriting it from whichever
+  scikit-learn is installed (a no-op on >= 1.5). The conformance test checks
+  eight inputs, not the one that happened to agree.
+
 ### Music-QA honesty demo scenes
 - **`viewer/samples/music-qa-honesty/`**: five Qwen2.5-0.5B-Instruct prior /
   percept / paired scenes (sycophancy, citation hallucination, noisy input,

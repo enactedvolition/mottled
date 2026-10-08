@@ -52,11 +52,20 @@ def _hidden(n_layers=6, n_tokens=5, dim=24, seed=0):
     return h
 
 
-def test_pca_matches_python():
+# Several seeds, because a sign rule is a per-input coin flip: with one
+# fixture the two sides once disagreed on 12 of 20 inputs while this test
+# passed on the one where they happened to agree.
+@pytest.mark.parametrize("seed", range(8))
+def test_pca_matches_python(seed):
     """Projected coordinates agree, including component signs."""
-    h = _hidden()
+    h = _hidden(seed=seed)
     coords, projector = project_joint([h])
     coords = coords[0].reshape(-1, 2)
+
+    # The reference's own rule, pinned rather than inherited from whichever
+    # scikit-learn is installed: each component's largest-|.| entry positive.
+    comps = projector._pca.components_
+    assert (comps[np.arange(len(comps)), np.abs(comps).argmax(axis=1)] > 0).all()
 
     flat = h.reshape(-1, h.shape[-1])
     js = _run_js(
