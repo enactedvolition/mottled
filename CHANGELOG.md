@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### The shotgun blast: one pellet per prompt
+- **`blast.py`** draws many prompts as one family: each prompt is one pellet,
+  read at one position (by default the state before the model writes), and
+  every layer gets its own frame around the family's centroid. Where every
+  prompt ends on the same template token, layer 0 is one point and the spread
+  with depth is the content. It replaces nothing: the token-trajectory scene
+  stays. On real captures its single global projection spent its axes on what
+  the reader already knew (one attention-sink token owned the frame; without
+  it the layer index explained ~98% of the on-screen variance, the prompts
+  0%).
+- Two layouts. **monitor**: x is the score a deployed linear monitor would
+  read for one label, K-fold cross-fitted so a split is held out rather than
+  memorised, with its AUROC per layer beside a label-shuffle null band; y is
+  the largest variation x leaves out. Items can share a `group` (a contrast
+  pair), held out together: scoring a pellet while its twin is in training
+  put 9 of 25 layers below the null on TruthfulQA pairs. **open**:
+  unsupervised, one camera per layer from the pellet patterns the layers
+  agree on; a pellet is never drawn further out than its full-space
+  distance.
+- **`mottled export-blast items.jsonl`**: `{"id", "text" or "messages",
+  "labels", "group"}` per line; `--chat` reads at the generation prompt, and
+  an item ending on an assistant turn is read at its claim's last token.
+  `capture(positions=[...])` runs the logit lens on those positions only,
+  which made a 48-prompt chat export take seconds rather than half an hour
+  on CPU.
+- The scene is an ordinary `kind: "scene"` (flat terrain, one run of
+  pellets) plus an additive `blast` record, so older viewers still draw it;
+  `mtj.js` resolves the record and the viewer gets a layout toggle, colour by
+  label, rings on pellets whose labels disagree, and the per-layer readout.
+- Samples in `viewer/samples/blast/` (not in the wheel): refusal on
+  Qwen2.5-0.5B-Instruct (AdvBench requests against harmless ones written in
+  the same style) and TruthfulQA true/false answer pairs, whose second label
+  shows the "truth" readout sits beside a stronger negation one.
+
 ### Browser-built scenes are no longer mirrored
 - `viewer/scene.js` fixed PCA signs the way scikit-learn < 1.5 did (U-based
   `svd_flip`); scikit-learn 1.5 switched to V-based, so a scene built in the

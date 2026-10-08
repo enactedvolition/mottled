@@ -3,6 +3,7 @@
     mottled                    # Streamlit explorer (default)
     mottled serve              # stdlib web server: viewer + capture API
     mottled export PROMPT ...  # capture prompts -> scene.mtj on stdout/file
+    mottled export-blast ITEMS # one pellet per JSONL item -> blast scene .mtj
     mottled export-manifest S  # print the analysis record a .mtj carries
     mottled parity             # compare captures against the reference libraries
     mottled smoke              # does this install actually work?
@@ -50,6 +51,22 @@ def main(argv: list[str] | None = None) -> int:
                                "several prompts on one model. The scene is built "
                                "in readout space (the vocabulary the models share), "
                                "since they share no hidden space.")
+
+    p_blast = sub.add_parser(
+        "export-blast",
+        help="capture one pellet per prompt and write a blast scene (.mtj)")
+    p_blast.add_argument("items", help='JSONL, one item per line: {"id", "text" or '
+                         '"messages", "labels": {name: 0/1/null}, optional '
+                         '"group" (held out together, e.g. a contrast pair)}')
+    p_blast.add_argument("-o", "--output", default="blast.mtj")
+    p_blast.add_argument("--model", default="gpt2")
+    p_blast.add_argument("--chat", action="store_true",
+                         help="send text items through the model's chat template "
+                              "(the pellet is then the state before it writes)")
+    p_blast.add_argument("--layouts", default="monitor,open", metavar="A,B",
+                         help="monitor (one per usable label) and/or open")
+    p_blast.add_argument("--seed", type=int, default=0,
+                         help="seed of the monitor's shuffle null")
 
     p_manifest = sub.add_parser(
         "export-manifest",
@@ -162,6 +179,26 @@ def main(argv: list[str] | None = None) -> int:
         from serve import run_server
 
         run_server(port=args.port, model=args.model)
+        return 0
+
+    if args.command == "export-blast":
+        import json
+
+        import statefile
+        from blast import BlastConfig
+        from pipeline import run_blast
+
+        items = [json.loads(line) for line in
+                 Path(args.items).read_text(encoding="utf-8").splitlines() if line.strip()]
+        cfg = BlastConfig(model=args.model, chat=args.chat, seed=args.seed,
+                          methods=tuple(m.strip() for m in args.layouts.split(",")
+                                        if m.strip()))
+        result = run_blast(items, args.model, cfg=cfg)
+        statefile.save_scene(result, args.output)
+        names = [b.name for b in result["blast"]["layouts"]]
+        print(f"wrote {args.output}: {len(items)} pellets; layouts: {', '.join(names)}")
+        for why in result["blast"]["skipped"]:
+            print(f"  no monitor for {why}")
         return 0
 
     if args.command == "export":

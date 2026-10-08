@@ -166,6 +166,34 @@ Fields:
 - `comparisons` *(optional)*: for runs beyond the first, JSON summaries:
   `{ "label", "hausdorff", "dtw_normalized", "shared_tokens", "onset_layer",
      "readout_changed" }`.
+- `blast` *(optional)*: a **pellet family** (`blast.py`, `mottled
+  export-blast`): one pellet per prompt, read at one position, at every
+  layer. The scene keeps every required field, so a reader without this
+  record still draws something true: the terrain is flat (`2 x 2`, z = 0)
+  and there is one run whose `N` trajectories are the `N` pellets drawn at
+  the first layout, its `tokens` the pellet ids and its per-(layer, token)
+  arrays (`entropy`, `topk`, `quality`) per (layer, pellet). Each pellet's
+  `{ "id", "text", "labels": {name: 0 | 1} }` is in `meta.pellets`, in run
+  order. The record:
+  `{ "schema": "mottled-blast/1", "range" → (N, L), "spread" → (L,),
+     "norm" → (L,), "skipped": [str, …], "layouts": [ … ] }`.
+  Positions are in units of each layer's mean state norm (`norm`), around
+  that layer's centroid, so each layer has its own frame. `range[i, l]` is
+  pellet `i`'s exact full-space distance from the centroid in that unit,
+  and `spread[l]` the family's RMS range. Each layout is
+  `{ "name", "method": "monitor" | "open", "driver": label name or null,
+     "positions" → (N, L, 2) float32, "quality" → (L, N) float32 k = 5
+     neighbourhood preservation per layer, "exact" / "fitted" / "projected":
+     [str, …] what each part of the picture is, "arrays": {name → ref},
+     "params": {…} }`. `monitor` arrays: `auroc`, `null05`, `null95` (L,)
+  — the cross-fitted readout AUROC of the driver label per layer and the
+  5th / 95th percentiles of the same statistic under label shuffles (NaN
+  where the layer is one point) — and `labelled` (N,) int32, 1 where the
+  pellet's driver label was used. `open` arrays: `shown` (L,), the share of
+  each layer's spread the camera keeps, and `mass` (N,), each pellet's
+  weight in choosing it; `params.copies` / `params.near_copies` list the
+  pellet pairs that shared a vote, and the pairs within 10% of that cut.
+  `skipped` says why a label could not drive a monitor.
 
 Array names for run `i` are conventionally prefixed `run{i}.` (e.g.
 `run0.points`) but viewers MUST resolve them through the manifest references,

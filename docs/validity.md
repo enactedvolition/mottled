@@ -16,6 +16,9 @@ and causally targeted validation.
 - SAE labels = auto-interp correlations. Not verified functions.
 - `density_se` = a lower bound (the bootstrap treats dependent states as
   independent). Not a confidence statement.
+- A blast monitor split = these labelled prompts are linearly separable,
+  held out, at that layer. Not what the model computes, and not yet a
+  monitor: check wording, contrast pairs and surface features first.
 - A pretty picture ≠ a mechanism. Confirm on held-out prompts, in full
   hidden space, with causal methods.
 
@@ -158,6 +161,39 @@ probes fitted on held-out prompts, compared against the raw lens;
 intermediate prediction stability compared against actual causal
 predictiveness of those states; calibration and rank correlation between
 intermediate readout scores and the final output distribution.
+
+## A blast monitor is a held-out readout
+
+The blast's **monitor** layout (`blast.py`) draws each prompt where a linear
+readout for one label puts it. What it measures: whether the labelled prompts'
+states at that layer separate along the diff-of-means direction **when each
+prompt is scored on a direction fitted without it** (K-fold cross-fitting),
+reported as an AUROC beside the same statistic under label shuffles. That is
+the question a deployment monitor asks, answered for these prompts. It is not
+evidence that the model represents the label as such, or uses it.
+
+What the cross-fitting does not remove, each of which the samples in
+`viewer/samples/blast/` were built to show:
+
+- **Wording.** If the two classes differ in form, the readout can read the
+  form. Refusal against Alpaca's harmless prompts read 0.94 at layer 1;
+  against harmless prompts written in AdvBench's imperative style, 0.77.
+- **Contrast pairs.** Two answers to one question share most of their state.
+  Scored while its twin is in training, a held-out pellet lands on the twin's
+  side: TruthfulQA pairs read below the shuffle null at 9 of 25 layers until
+  each pair was held out together (`group`).
+- **Surface features.** On those pairs a one-bit negation label reads as well
+  as the true/false label it travels with (12 of 24 true answers carry a
+  negation word, 2 of 24 false ones). Put the surface feature in as a second
+  label and compare the two monitors.
+- **Behaviour vs request.** A monitor for what the model *did* (refused) is
+  only distinguishable from one for what it was *asked* (harmful) through the
+  prompts where the two disagree; with one such prompt, it is not.
+
+The **open** layout uses no labels, but its camera is built from every depth,
+so structure from deeper layers can show at shallower ones (each pellet's own
+bearing is left out of its camera, which reduces that, not removes it). Read a
+split there as a lead for the monitor, not as an onset.
 
 ## Interventions: sufficiency, not mechanism
 

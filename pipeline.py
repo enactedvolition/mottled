@@ -506,3 +506,65 @@ def run_intervention(cfg: MarbleConfig, prompt: str, interventions: list,
                 capture_attention=cfg.capture_attention)
     return result
 
+
+
+def _blast_input(tokenizer, item: dict, chat: bool) -> tuple[str, list[int] | None]:
+    """An item's text and, when a chat template is involved, its exact ids.
+
+    Ending on a user turn, the ids end on the generation prompt: the state the
+    model is in before it writes. Ending on an assistant turn, they end on the
+    reply's last token (the template continues that turn instead of opening
+    a new one), which is where a claim the model has made can be read."""
+    msgs = item.get("messages")
+    if msgs is None:
+        if not chat:
+            return item["text"], None
+        msgs = [{"role": "user", "content": item["text"]}]
+    text = item.get("text") or msgs[-1]["content"]
+    if msgs[-1]["role"] != "assistant":
+        return text, chat_input(tokenizer, msgs)[1]
+    if not getattr(tokenizer, "chat_template", None):
+        raise ValueError(f"item {item.get('id')!r} ends on an assistant turn, which "
+                         "needs the tokenizer's chat template to continue it")
+    ids = tokenizer.apply_chat_template(msgs, tokenize=True, add_generation_prompt=False,
+                                        continue_final_message=True)
+    if hasattr(ids, "keys"):
+        ids = ids["input_ids"]
+    return text, [int(i) for i in ids]
+
+
+def run_blast(items: list[dict], model, tokenizer=None, cfg=None) -> dict:
+    """One pellet per item, every layout its labels support, ready for
+    `statefile.save_scene`.
+
+    Each item is {"id", "text" or "messages", "labels": {name: 0/1/null}}
+    and optionally "group": items sharing one (a contrast pair) are held out
+    together by the monitor's cross-fitting.
+    Every item is captured at `cfg.position` only (`capture(positions=...)`),
+    stacked into a pellet family (`blast.pellets`), and laid out
+    (`blast.layouts`); the result carries its analysis record.
+    """
+    import blast as blast_mod
+    from capture import load_model
+
+    cfg = cfg or blast_mod.BlastConfig(model=model if isinstance(model, str) else "")
+    if isinstance(model, str):
+        model, tokenizer = load_model(model, device=cfg.device, dtype=cfg.dtype)
+    trajs, texts = [], []
+    for item in items:
+        text, ids = _blast_input(tokenizer, item, cfg.chat)
+        trajs.append(capture(model, text, tokenizer=tokenizer, top_k=cfg.top_k,
+                             device=cfg.device, dtype=cfg.dtype, keep_logits=False,
+                             input_ids=ids, positions=[cfg.position]))
+        texts.append(text)
+    fam = blast_mod.pellets(trajs, [str(it["id"]) for it in items],
+                            labels=[it.get("labels") or {} for it in items],
+                            texts=texts, position=0,
+                            groups=[it.get("group") for it in items])
+    fam.meta["position"] = cfg.position
+    built, skipped = blast_mod.layouts(fam, methods=cfg.methods, seed=cfg.seed,
+                                       folds=cfg.folds, null_draws=cfg.null_draws,
+                                       copy_tol=cfg.copy_tol)
+    result = blast_mod.scene(fam, built, skipped)
+    result["analysis"] = provenance_mod.record(cfg, prompts=texts, trajs=[fam])
+    return result

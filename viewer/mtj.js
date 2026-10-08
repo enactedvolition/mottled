@@ -196,7 +196,65 @@
     });
     if (!runs.length) throw new Error("corrupt scene: no runs");
 
-    return { manifest, arrays, meta: manifest.meta || {}, terrain, runs, comparisons: manifest.comparisons || [] };
+    return { manifest, arrays, meta: manifest.meta || {}, terrain, runs,
+             comparisons: manifest.comparisons || [],
+             blast: resolveBlast(manifest.blast, manifest.meta, arrays, runs[0]) };
+  }
+
+  // Optional `blast` record (blast.py): one pellet per prompt, with every
+  // layout the writer built. The scene's run 0 is the pellets drawn at the
+  // first layout, so a viewer without this code still shows them; this
+  // record adds the other layouts and what each one's axes mean. A layout
+  // whose positions are missing or the wrong shape is dropped; when none
+  // survives, or the pellets do not match run 0, the record reads null
+  // (same contract as `features` and `inspector`).
+  function resolveBlast(b, meta, arrays, run0) {
+    if (!b || typeof b !== "object" || Array.isArray(b)) return null;
+    const n = run0.points.shape[0], L = run0.points.shape[1];
+    const pellets = meta && Array.isArray(meta.pellets) ? meta.pellets : null;
+    if (!pellets || pellets.length !== n) return null;
+    const arr = (ref, shape) => {
+      const a = typeof ref === "string" ? arrays[ref] : null;
+      if (!a || a.shape.length !== shape.length) return null;
+      return a.shape.every((s, i) => shape[i] == null || s === shape[i]) ? a : null;
+    };
+    const strings = (x) => (Array.isArray(x) ? x.map(String) : []);
+    const layouts = (Array.isArray(b.layouts) ? b.layouts : []).map((lay) => {
+      if (!lay || typeof lay !== "object") return null;
+      const positions = arr(lay.positions, [n, L, 2]);
+      if (!positions) return null;
+      const extra = {};
+      const refs = lay.arrays && typeof lay.arrays === "object" ? lay.arrays : {};
+      for (const k of Object.keys(refs)) {
+        const a = typeof refs[k] === "string" ? arrays[refs[k]] : null;
+        if (a) extra[k] = a;
+      }
+      return {
+        name: lay.name != null ? String(lay.name) : String(lay.method || "layout"),
+        method: lay.method != null ? String(lay.method) : null,
+        driver: typeof lay.driver === "string" ? lay.driver : null,
+        positions,                              // (N, L, 2) float32
+        quality: arr(lay.quality, [L, n]),      // (L, N) or null
+        exact: strings(lay.exact), fitted: strings(lay.fitted),
+        projected: strings(lay.projected),
+        arrays: extra,                          // monitor: auroc, null05, null95 (L,), labelled (N,)
+        params: lay.params && typeof lay.params === "object" ? lay.params : {},
+      };
+    }).filter(Boolean);
+    if (!layouts.length) return null;
+    return {
+      schema: typeof b.schema === "string" ? b.schema : null,
+      pellets: pellets.map((p) => ({
+        id: p && p.id != null ? String(p.id) : "",
+        text: p && p.text != null ? String(p.text) : "",
+        labels: p && p.labels && typeof p.labels === "object" ? p.labels : {},
+      })),
+      layouts,
+      skipped: strings(b.skipped),
+      range: arr(b.range, [n, L]),             // (N, L) exact distance from origin
+      spread: arr(b.spread, [L]),              // (L,) RMS of range
+      norm: arr(b.norm, [L]),                  // (L,) the unit: mean state norm
+    };
   }
 
   // ------------------------------------------------ generation (decode) helpers
