@@ -548,16 +548,35 @@ def run_blast(items: list[dict], model, tokenizer=None, cfg=None) -> dict:
     from capture import load_model
 
     cfg = cfg or blast_mod.BlastConfig(model=model if isinstance(model, str) else "")
+    # every check that can fail on the file, before a capture that can take
+    # an hour on a large model
+    ids = [str(it.get("id", "")) for it in items]
+    if len(items) < 3:
+        raise ValueError(f"a blast needs at least 3 items; got {len(items)}")
+    if any(not i for i in ids) or len(set(ids)) != len(ids):
+        raise ValueError("every item needs an id, and ids must be unique")
+    if any(it.get("text") is None and not it.get("messages") for it in items):
+        raise ValueError("every item needs 'text' or 'messages'")
+    bad = set(cfg.methods) - {"monitor", "open"}
+    if bad:
+        raise ValueError(f"unknown layout {sorted(bad)}; choose from monitor, open")
+    if any(it.get("messages") for it in items):
+        # messages always go through the template, whatever --chat said
+        from dataclasses import replace as _replace
+        cfg = _replace(cfg, chat=True)
     if isinstance(model, str):
         model, tokenizer = load_model(model, device=cfg.device, dtype=cfg.dtype)
-    trajs, texts = [], []
+    trajs, texts, sent = [], [], []
     for item in items:
-        text, ids = _blast_input(tokenizer, item, cfg.chat)
+        text, input_ids = _blast_input(tokenizer, item, cfg.chat)
         trajs.append(capture(model, text, tokenizer=tokenizer, top_k=cfg.top_k,
                              device=cfg.device, dtype=cfg.dtype, keep_logits=False,
-                             input_ids=ids, positions=[cfg.position]))
+                             input_ids=input_ids, positions=[cfg.position]))
         texts.append(text)
-    fam = blast_mod.pellets(trajs, [str(it["id"]) for it in items],
+        # what the model was given, template and system prompt included: the
+        # display text alone does not reproduce a chat capture
+        sent.append(text if input_ids is None else tokenizer.decode(input_ids))
+    fam = blast_mod.pellets(trajs, ids,
                             labels=[it.get("labels") or {} for it in items],
                             texts=texts, position=0,
                             groups=[it.get("group") for it in items])
@@ -566,5 +585,5 @@ def run_blast(items: list[dict], model, tokenizer=None, cfg=None) -> dict:
                                        folds=cfg.folds, null_draws=cfg.null_draws,
                                        copy_tol=cfg.copy_tol)
     result = blast_mod.scene(fam, built, skipped)
-    result["analysis"] = provenance_mod.record(cfg, prompts=texts, trajs=[fam])
+    result["analysis"] = provenance_mod.record(cfg, prompts=sent, trajs=[fam])
     return result

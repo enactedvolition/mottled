@@ -445,7 +445,9 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
 
     if positions is not None:
         T = hidden.shape[1]
-        if not positions or any(not -T <= p < T for p in positions):
+        if not positions:
+            raise ValueError("positions is empty: name at least one token to keep")
+        if any(not -T <= p < T for p in positions):
             raise ValueError(f"positions {positions} outside a {T}-token input")
         positions = [p % T for p in positions]
         hidden = hidden[:, positions]

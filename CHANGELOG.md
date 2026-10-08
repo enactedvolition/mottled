@@ -9,15 +9,17 @@
   prompt ends on the same template token, layer 0 is one point and the spread
   with depth is the content. It replaces nothing: the token-trajectory scene
   stays. On real captures its single global projection spent its axes on what
-  the reader already knew (one attention-sink token owned the frame; without
-  it the layer index explained ~98% of the on-screen variance, the prompts
-  0%).
+  the reader already knew: in the bundled GPT-2 capitals scene one
+  attention-sink token's path is ~15x the others', and which prompt a state
+  came from explains none of the on-screen variance.
 - Two layouts. **monitor**: x is the score a deployed linear monitor would
   read for one label, K-fold cross-fitted so a split is held out rather than
   memorised, with its AUROC per layer beside a label-shuffle null band; y is
   the largest variation x leaves out. Items can share a `group` (a contrast
   pair), held out together: scoring a pellet while its twin is in training
-  put 9 of 25 layers below the null on TruthfulQA pairs. **open**:
+  put 9 of 25 layers below the null on TruthfulQA pairs, and the null
+  itself only moves labels as the pair design could. A grouping that would
+  train a fold on one class is refused rather than drawn. **open**:
   unsupervised, one camera per layer from the pellet patterns the layers
   agree on; a pellet is never drawn further out than its full-space
   distance.

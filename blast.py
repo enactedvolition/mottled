@@ -2,13 +2,16 @@
 
 The token-trajectory scene draws every (layer, token) state through one global
 projection, and on real captures that projection spends its axes on what the
-reader already knows: one attention-sink token owns the frame, and with it
-removed the layer index explains ~98% of the on-screen variance. Here each
-prompt is one pellet, read at one position (by default the last token, the
-state a deployed monitor would read before the model writes), and every layer
-gets its own frame around the family's centroid. Where every prompt ends on
-the same template token the layer-0 pellets are one point: the muzzle is in
-the data, and the spread with depth is the content.
+reader already knows: in the bundled GPT-2 capitals scene one attention-sink
+token's path is ~15x the others' and which prompt a state came from explains
+none of the on-screen variance. Here each prompt is one pellet, read at one
+position (by default the last token, the state a deployed monitor would read
+before the model writes), and every layer gets its own frame around the
+family's centroid. Where every prompt ends on the same template token and the
+model adds position only inside attention (rotary, as Qwen and Llama do), the
+layer-0 pellets are one point: the muzzle is in the data, and the spread with
+depth is the content. With learned absolute positions (GPT-2) layer 0 already
+differs by prompt length, and length is a channel every layer can carry.
 
 A pellet family is an ordinary StateTrajectory whose T axis indexes pellets
 (`pellets`), so nothing here reaches into a model. Two layouts:
@@ -16,20 +19,19 @@ A pellet family is an ordinary StateTrajectory whose T axis indexes pellets
   monitor  x = the score a deployed linear monitor would read: each pellet's
            dot product with the diff-of-means direction for one label,
            K-fold cross-fitted, so a labelled pellet is scored on a direction
-           fitted without it. In-sample, that direction separates any labels
-           in 48 points of 896-d (the truth negative control read 0.88-0.95);
-           cross-fitted it read 0.38-0.59. y = the largest variation x leaves
+           fitted without it: in-sample, that direction ranks even labels
+           with no held-out signal highly, because 48 points in 896-d leave
+           it room to. y = the direction most pellets share in what x leaves
            out, carrying no label. Supervised, so it needs labels and says
            which one drives x.
   open     unsupervised. One camera per layer, built from the pellet patterns
            the layers agree on (a multi-table PCA of unit bearings), each
-           pellet drawn with a camera its own bearing did not build. Screen
-           radius never exceeds the pellet's full-space distance from the
-           origin.
+           pellet drawn with a camera that leaves out its own bearing at
+           that depth. Screen radius never exceeds the pellet's full-space
+           distance from the origin.
 
-Both were chosen against a fixed bar on 192 deployment prompts (refusal,
-sycophancy, prompt injection, and a truthfulness negative control) on
-Qwen2.5-0.5B-Instruct; the measured trade-offs are in each layout's caption.
+Both were chosen against criteria fixed in advance on 192 deployment prompts
+(refusal, sycophancy, prompt injection, truthfulness) on Qwen2.5-0.5B-Instruct.
 A split on screen is a readout of these prompts under this view, to be
 confirmed on held-out prompts, not evidence of mechanism (docs/validity.md).
 """
@@ -45,20 +47,23 @@ from projection import neighborhood_preservation
 from trajectory import StateTrajectory
 
 # A label drives a monitor only with at least this many labelled pellets per
-# class: below it a fold can hold out a whole class.
+# class: fewer and its held-out AUROC can only take a handful of values.
 MIN_PER_CLASS = 3
 FOLDS = 5
 NULL_DRAWS = 200
 # Pellets whose flights stay within this fraction of the family's RMS spread
 # of each other at every depth are copies of one flight and share one vote in
-# choosing the open camera. Declared rather than tuned per scene: 0.5 sits in
-# the gap the design set showed between near-identical replies (0.07-0.44)
-# and the closest distinct pair (0.58). Pairs near it are reported.
+# choosing the open camera, so one reply repeated four times is not four
+# votes for its own direction. Declared, not tuned per scene, and it is a
+# cut, not a gap: on the truth sample it merges identical replies and a
+# true/false pair one word apart. The merged pairs and those near the cut are
+# reported in the layout's params.
 COPY_TOL = 0.5
 # relative: a layer whose deviations are all below this is one point (layer 0
 # of a generation-prompt family is bit-identical) and gets no direction
 _POINT_TOL = 1e-9
 _NBHD_K = 5
+_LABELS = ("monitor", "open")
 
 
 @dataclass
@@ -133,7 +138,10 @@ def pellets(trajs: list[StateTrajectory], ids: list[str],
     topk = ([[t.topk[l][position] for t in trajs] for l in range(L)]
             if all(t.topk is not None for t in trajs) else None)
     meta = dict(trajs[0].meta)
+    # the first trajectory's own prompt and token positions describe it, not
+    # the family; each pellet's read position is in its own entry below
     meta.pop("prompt", None)
+    meta.pop("positions", None)
     meta["axis"] = "pellets"
     meta["position"] = position
     meta["pellets"] = [{"id": str(i), "text": str(x), "labels": dict(lab)}
@@ -141,6 +149,10 @@ def pellets(trajs: list[StateTrajectory], ids: list[str],
     for p, g in zip(meta["pellets"], groups or []):
         if g is not None:
             p["group"] = str(g)
+    for p, t in zip(meta["pellets"], trajs):
+        if "positions" in t.meta:
+            p["read_at"] = int(t.meta["positions"][position])
+        p["read_token"] = str(t.tokens[position])
     return StateTrajectory(hidden=hidden.astype(np.float32), tokens=[str(i) for i in ids],
                            entropy=entropy, topk=topk, meta=meta)
 
@@ -169,6 +181,9 @@ def frame(hidden: np.ndarray) -> dict:
     spread (L,) the family's RMS range; norm (L,) the unit.
     """
     X = np.asarray(hidden, dtype=np.float64)
+    if not np.isfinite(X).all():
+        l, i = np.argwhere(~np.isfinite(X).all(axis=2))[0]
+        raise ValueError(f"pellet {i} has a non-finite state at layer {l}")
     norm = np.linalg.norm(X, axis=2).mean(axis=1)
     dev = (X - X.mean(axis=1, keepdims=True)) / np.maximum(norm, 1e-30)[:, None, None]
     rng = np.linalg.norm(dev, axis=2).T
@@ -182,12 +197,15 @@ def _is_point(dev_l: np.ndarray) -> bool:
 
 def _quality(dev: np.ndarray, pos: np.ndarray) -> np.ndarray:
     """(L, N) k-NN overlap between each layer's full-space pellets and their
-    screen positions. A layer that is one point preserves everything."""
+    screen positions. A layer that is one point preserves everything. k is at
+    most half the family: with k = N - 1 every pellet's neighbours are all
+    the others, and noise scores a perfect 1."""
     L, N, _ = dev.shape
+    k = min(_NBHD_K, max(1, (N - 1) // 2))
     q = np.ones((L, N), dtype=np.float32)
     for l in range(L):
         if not _is_point(dev[l]):
-            q[l] = neighborhood_preservation(dev[l], pos[:, l], k=_NBHD_K)
+            q[l] = neighborhood_preservation(dev[l], pos[:, l], k=k)
     return q
 
 
@@ -252,11 +270,42 @@ def _crossfit_x(dev: np.ndarray, y: np.ndarray, fold: np.ndarray, k: int) -> np.
     return x
 
 
+def _shuffle(y: np.ndarray, ids: list[str], groups: list[str] | None,
+             rng: np.random.Generator) -> np.ndarray:
+    """One draw of the label-shuffle null, in an order fixed by the pellets'
+    ids, so reordering the items cannot move the band.
+
+    Without groups, labels are shuffled across the labelled pellets. With
+    groups they are shuffled the way the design could have assigned them:
+    whole label sets move between groups of one size, then labels move within
+    a group. Shuffling freely across pellets makes patterns a contrast-pair
+    design cannot (both answers to one question false), and on no-signal
+    pairs it put 0% of layers outside a band meant to hold 5% on each side."""
+    yp = y.copy()
+    lab = np.flatnonzero(y >= 0)
+    if groups is None:
+        canon = sorted(lab, key=lambda i: _hash(ids[i]))
+        yp[canon] = y[canon][rng.permutation(len(canon))]
+        return yp
+    members: dict[str, list[int]] = {}
+    for i in sorted(lab, key=lambda i: _hash(ids[i])):
+        members.setdefault(groups[i], []).append(i)
+    by_size: dict[int, list[str]] = {}
+    for g in sorted(members, key=_hash):
+        by_size.setdefault(len(members[g]), []).append(g)
+    for size in sorted(by_size):
+        names = by_size[size]
+        sets = [y[members[g]] for g in names]
+        for g, src in zip(names, rng.permutation(len(names))):
+            yp[members[g]] = sets[src][rng.permutation(size)]
+    return yp
+
+
 def _sign_direction(R: np.ndarray) -> np.ndarray:
     """Unit direction of the top spatial-sign principal component of rows R:
     rows are unit-normalised before the Gram eigenproblem, so the direction
     is the one most pellets share rather than the one a single far pellet
-    owns (with raw rows one off-axis injection pellet took 30% of y)."""
+    owns (with raw rows one off-axis prompt-injection pellet took most of y)."""
     rn = np.linalg.norm(R, axis=1)
     U = R / np.maximum(rn, 1e-300)[:, None]
     w, V = np.linalg.eigh(U @ U.T)
@@ -290,6 +339,15 @@ def monitor(traj: StateTrajectory, driver: str, folds: int = FOLDS,
     k = int(min(folds, n_units))
     fold = _folds(ids, y, k, groups)
     lab = y >= 0
+    # with groups, the unit held out is a group, so a fold can take a whole
+    # class out of training; its pellets would sit at x = 0 under a caption
+    # saying they were held out
+    for f in range(k):
+        tr = lab & (fold != f)
+        if k < 2 or not (y[tr] == 1).any() or not (y[tr] == 0).any():
+            raise ValueError(f"monitor for {driver!r}: with these groups fold {f} of {k} "
+                             "trains on one class or none; split the groups, or use the "
+                             "open layout")
 
     point = np.array([_is_point(dev[l]) for l in range(L)])
     x = _crossfit_x(dev, y, fold, k)
@@ -320,8 +378,7 @@ def monitor(traj: StateTrajectory, driver: str, folds: int = FOLDS,
     rng = np.random.default_rng(seed)
     null = np.full((null_draws, L), np.nan)
     for b in range(null_draws):
-        yp = y.copy()
-        yp[lab] = rng.permutation(y[lab])
+        yp = _shuffle(y, ids, groups, rng)
         xp = _crossfit_x(dev, yp, _folds(ids, yp, k, groups), k)
         null[b] = [np.nan if point[l] else _auroc(xp[l, lab], yp[lab]) for l in range(L)]
     # both tails: with few pellets, or pellets that come in near-twin pairs
@@ -343,9 +400,9 @@ def monitor(traj: StateTrajectory, driver: str, folds: int = FOLDS,
                 + ": a labelled pellet is scored on a direction fitted without it"
                 + (" or its group" if groups else "")
                 + ", so a split on x is held out, not memorised"],
-        projected=["y: the largest variation x leaves out (top spatial-sign principal "
-                   "direction of the residual); it carries no label, and screen "
-                   "distance is not full-space distance"],
+        projected=["y: the direction most pellets share in what x leaves out (top "
+                   "spatial-sign principal direction of the residual); it carries no "
+                   "label, and screen distance is not full-space distance"],
         arrays={"auroc": auroc.astype(np.float32), "null05": null05.astype(np.float32),
                 "null95": null95.astype(np.float32), "labelled": lab.astype(np.int32)},
         params={"folds": k, "grouped": groups is not None, "null_draws": null_draws,
@@ -368,6 +425,8 @@ def open_layout(traj: StateTrajectory, copy_tol: float = COPY_TOL) -> BlastLayou
     fr = frame(traj.hidden)
     dev = fr["dev"]
     L, N, _ = dev.shape
+    if N < 3:
+        raise ValueError(f"the open layout needs at least 3 pellets; got {N}")
     rng = fr["range"]                                      # (N, L)
     live = rng > _POINT_TOL
     U = np.where(live.T[..., None], dev / np.maximum(rng.T, 1e-300)[..., None], 0.0)
@@ -396,7 +455,7 @@ def open_layout(traj: StateTrajectory, copy_tol: float = COPY_TOL) -> BlastLayou
             continue                                       # the muzzle: one point
         B_all = U[l].T @ V                                 # (D, 2)
         for i in range(N):
-            # drawn with a camera its own bearing did not build: otherwise a
+            # its own bearing at this depth is left out of its camera: otherwise a
             # depth with no structure of its own inherits the pellet's pattern
             # value from the other depths and still looks split
             B = B_all - np.outer(U[l, i], V[i])
@@ -415,7 +474,7 @@ def open_layout(traj: StateTrajectory, copy_tol: float = COPY_TOL) -> BlastLayou
         exact=["origin: the family's centroid at each layer; unit: that layer's "
                "mean state norm",
                "a pellet's distance from the origin on screen is at most its "
-               "full-space distance; `shown` is the share of each layer's spread "
+               "full-space distance; the readout gives the share of each layer's spread "
                "the camera keeps"],
         projected=["positions: one camera per layer, built from the pellet patterns "
                    "the layers agree on, without labels. It is built from every depth, "
@@ -438,6 +497,9 @@ def layouts(traj: StateTrajectory, drivers: list[str] | None = None,
     """Every layout a family supports: a monitor per usable label, then open.
     Returns (layouts, skipped) where skipped explains each label that could
     not drive a monitor."""
+    unknown = set(methods) - set(_LABELS)
+    if unknown:
+        raise ValueError(f"unknown layout {sorted(unknown)}; choose from {list(_LABELS)}")
     names = drivers if drivers is not None else sorted(
         {k for p in traj.meta.get("pellets", []) for k in p.get("labels", {})})
     out, skipped = [], []

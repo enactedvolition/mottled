@@ -199,6 +199,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {args.output}: {len(items)} pellets; layouts: {', '.join(names)}")
         for why in result["blast"]["skipped"]:
             print(f"  no monitor for {why}")
+        if result["blast"]["spread"][0] > 1e-6:
+            # no muzzle: the prompts already differ before any block runs, by
+            # the read token or, with learned absolute positions (GPT-2), by
+            # length, which every layer can then carry to the monitor
+            print(f"  note: layer 0 is not one point (spread "
+                  f"{result['blast']['spread'][0]:.3f}); the read token or prompt "
+                  "length differs across items, and a monitor can read it")
         return 0
 
     if args.command == "export":

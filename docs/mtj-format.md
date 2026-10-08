@@ -173,8 +173,10 @@ Fields:
   and there is one run whose `N` trajectories are the `N` pellets drawn at
   the first layout, its `tokens` the pellet ids and its per-(layer, token)
   arrays (`entropy`, `topk`, `quality`) per (layer, pellet). Each pellet's
-  `{ "id", "text", "labels": {name: 0 | 1} }` is in `meta.pellets`, in run
-  order. The record:
+  `{ "id", "text", "labels": {name: 0 | 1 | null}, "group"?: str,
+  "read_at"?: int, "read_token": str }` is in `meta.pellets`, in run order:
+  `group` names pellets the monitor held out together, `read_at` / `read_token`
+  the token position the state was read at. The record:
   `{ "schema": "mottled-blast/1", "range" → (N, L), "spread" → (L,),
      "norm" → (L,), "skipped": [str, …], "layouts": [ … ] }`.
   Positions are in units of each layer's mean state norm (`norm`), around
@@ -182,8 +184,8 @@ Fields:
   pellet `i`'s exact full-space distance from the centroid in that unit,
   and `spread[l]` the family's RMS range. Each layout is
   `{ "name", "method": "monitor" | "open", "driver": label name or null,
-     "positions" → (N, L, 2) float32, "quality" → (L, N) float32 k = 5
-     neighbourhood preservation per layer, "exact" / "fitted" / "projected":
+     "positions" → (N, L, 2) float32, "quality" → (L, N) float32
+     neighbourhood preservation per layer (k = 5, at most half the family), "exact" / "fitted" / "projected":
      [str, …] what each part of the picture is, "arrays": {name → ref},
      "params": {…} }`. `monitor` arrays: `auroc`, `null05`, `null95` (L,)
   — the cross-fitted readout AUROC of the driver label per layer and the

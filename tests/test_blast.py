@@ -112,10 +112,10 @@ def test_monitor_finds_a_real_signal():
     assert x[y == 1].mean() > x[y == 0].mean()                     # positive class to the right
 
 
-def _twins(grouped):
+def _twins(grouped, seed=11):
     """Contrast pairs with no label signal: each pair shares a large common
     state (one question, two answers) and one of each pair is labelled 1."""
-    rng = np.random.default_rng(11)
+    rng = np.random.default_rng(seed)
     q = rng.normal(size=(N // 2, D)) * 3.0
     h = np.zeros((L, N, D))
     for l in range(1, L):
@@ -130,11 +130,41 @@ def test_contrast_pairs_are_held_out_together():
     """Scored with its twin still in training, a held-out pellet lands on the
     twin's side: far below chance, a picture of the design, not the model."""
     loose = blast.monitor(_twins(grouped=False), "false", null_draws=100)
-    paired = blast.monitor(_twins(grouped=True), "false", null_draws=100)
     assert (loose.arrays["auroc"][1:] < loose.arrays["null05"][1:]).sum() >= 3
-    inside = ((paired.arrays["null05"][1:] <= paired.arrays["auroc"][1:])
-              & (paired.arrays["auroc"][1:] <= paired.arrays["null95"][1:]))
-    assert inside.all() and paired.params["grouped"]
+    assert blast.monitor(_twins(grouped=True), "false", null_draws=20).params["grouped"]
+
+
+def test_the_grouped_null_band_means_what_it_says():
+    """On no-signal pairs a 5-95% band should leave about 5% of layers out on
+    each side. Shuffling labels across pairs, which the design cannot do, left
+    none out: a band too wide to flag anything."""
+    tails = []
+    for seed in range(20):
+        m = blast.monitor(_twins(grouped=True, seed=seed), "false", null_draws=100)
+        a, lo, hi = (m.arrays[k][1:] for k in ("auroc", "null05", "null95"))
+        tails.append(((a < lo).mean(), (a > hi).mean()))
+    below, above = np.mean(tails, axis=0)
+    assert 0.01 < below < 0.15 and 0.01 < above < 0.15
+
+
+def test_a_fold_that_trains_on_one_class_is_refused():
+    t = _family(signal=3.0)
+    for p in t.meta["pellets"]:                 # every positive in one group
+        if p["labels"]["condition"] == 1:
+            p["group"] = "all-positives"
+    with pytest.raises(ValueError, match="trains on one class"):
+        blast.monitor(t, "condition", null_draws=10)
+    built, skipped = blast.layouts(t, null_draws=10)
+    assert [b.method for b in built] == ["open"] and "trains on one class" in skipped[0]
+
+
+def test_the_null_band_does_not_move_with_item_order():
+    t = _family(signal=1.0, seed=7)
+    order = np.random.default_rng(3).permutation(N)
+    a = blast.monitor(t, "condition", null_draws=50)
+    b = blast.monitor(_permuted(t, order), "condition", null_draws=50)
+    for k in ("null05", "null95"):
+        assert np.allclose(a.arrays[k], b.arrays[k], equal_nan=True)
 
 
 def test_monitor_refuses_without_labels():
@@ -158,7 +188,8 @@ def test_pellets_stack_one_position_per_trajectory():
     fam = blast.pellets(trajs, ["x", "y", "z"], labels=[{"c": 1}, {"c": 0}, {}])
     assert fam.hidden.shape == (3, 3, 5) and fam.tokens == ["x", "y", "z"]
     assert np.array_equal(fam.entropy[0], [0, 1, 2])
-    assert fam.meta["pellets"][1] == {"id": "y", "text": "", "labels": {"c": 0}}
+    assert fam.meta["pellets"][1] == {"id": "y", "text": "", "labels": {"c": 0},
+                                      "read_token": "d"}
     with pytest.raises(ValueError, match="unique"):
         blast.pellets(trajs, ["x", "x", "z"])
     trajs[1] = StateTrajectory(hidden=np.zeros((3, 4, 6), np.float32), tokens=list("abcd"))
@@ -219,3 +250,20 @@ def test_run_blast_end_to_end(tmp_path):
     s = statefile.load_scene(tmp_path / "b.mtj")
     assert s["runs"][0]["points"].shape == (len(items), result["traj"].n_layers, 3)
     assert [p["id"] for p in s["meta"]["pellets"]] == [it["id"] for it in items]
+
+
+def test_a_bad_items_file_fails_before_any_capture():
+    from pipeline import run_blast
+
+    class Unreachable:                    # a model the checks must not reach
+        def __getattr__(self, name):
+            raise AssertionError("captured before validating the items")
+
+    ok = [{"id": f"i{k}", "text": "hello world"} for k in range(3)]
+    for items, msg in ((ok[:2], "at least 3"), (ok + [{"id": "i0", "text": "x"}], "unique"),
+                       (ok + [{"id": "i9"}], "'text' or 'messages'")):
+        with pytest.raises(ValueError, match=msg):
+            run_blast(items, Unreachable(), tokenizer=object())
+    with pytest.raises(ValueError, match="unknown layout"):
+        run_blast(ok, Unreachable(), tokenizer=object(),
+                  cfg=blast.BlastConfig(model="m", methods=("monitr",)))

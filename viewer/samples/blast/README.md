@@ -28,10 +28,11 @@ the viewer, not results about any model beyond the one captured here.
   which is why it is 80. Harmful: 23 of 24 refused. Harmless: 0 of 24.
 - **What it shows:** at layer 0 every pellet is the same template token, one
   point. Under `monitor · harmful` the held-out readout is 0.77 at layer 1
-  and 1.00 from layer 16. Against Alpaca's harmless prompts it was 0.94 at
-  layer 1: matching the style removed part of the early split, which was
-  wording. The one harmful request the model answered (`h23`, fake reviews)
-  is ringed when colouring by `refused`. With one discordant pellet, a
+  and 0.99 or more from layer 13. On 24-prompt slices of Alpaca's harmless
+  prompts (not shipped: CC BY-NC 4.0) it read 0.86 to 0.94 at layer 1:
+  matching the style removed part of the early split, which was wording.
+  The one harmful request the model answered (`h23`, fake reviews) is ringed
+  when colouring by `refused`. With one discordant pellet, a
   refusal-behaviour monitor cannot be told apart from a harmful-request
   classifier here.
 
@@ -48,13 +49,20 @@ the viewer, not results about any model beyond the one captured here.
   don't, doesn't, isn't, cannot, no comment, depends, unknown). 12 of 24
   true answers carry one and 2 of 24 false ones; that one bit alone reads
   0.71 for `false_claim`.
-- **What it shows:** `monitor · false_claim` reads 0.64 to 0.82, above its
-  shuffle null at 20 of 25 layers. `monitor · negation` reads 0.89 to 0.93
-  in the late layers. Read together: these states separate true from false
-  answers, and they separate negated from plain ones more strongly, so a
-  "truth monitor" fitted on this set may be a negation monitor. Colouring by
-  `negation` under the `false_claim` layout rings the pellets where the two
-  disagree; those are the ones that decide it.
+- **What it shows:** `monitor · false_claim` reads 0.54 at layer 0 and 0.64
+  to 0.82 from layer 1, above its shuffle null at 24 of 25 layers (the null
+  moves labels only in ways the pair design could, see `blast._shuffle`).
+  `monitor · negation` reads 0.88 to 0.93 from layer 15. Read together: a
+  held-out readout ranks false answers above true ones, and ranks negated
+  claims above plain ones more strongly, so a "truth monitor" fitted on this
+  set may be a negation monitor. Colouring by `negation` under the
+  `false_claim` layout rings the 14 pellets that break the usual pairing (a
+  true answer without a negation word, or a false one with one); those are
+  the pellets that tell the two readouts apart.
+- **No muzzle:** each claim ends on its own token, so layer 0 is not one
+  point here, and the open layout counts two pairs as copies of one flight:
+  two identical "I have no comment" replies, and a true and a false answer
+  one word apart.
 
 ## Read the numbers with the picture
 
