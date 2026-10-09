@@ -21,9 +21,10 @@ app — only has to draw.
 from __future__ import annotations
 
 import json
+import math
 import struct
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Iterator
 
 import numpy as np
 
@@ -31,6 +32,10 @@ from trajectory import StateTrajectory
 
 MAGIC = b"MTRJ"
 VERSION = 1
+# Schema ids, one per manifest kind (additive: readers that predate them
+# ignore the key). Defined with the schemas they name in `mtjschema.py`,
+# which `python -m codegen` publishes to docs/schema/.
+from mtjschema import SCENE_SCHEMA, TRAJECTORY_SCHEMA  # noqa: E402
 _ALIGN = 16
 _DTYPES = {"float16": np.float16, "float32": np.float32, "int32": np.int32}
 
@@ -62,7 +67,13 @@ class _Writer:
     def write(self, fh: BinaryIO, manifest: dict) -> None:
         manifest = dict(manifest)
         manifest["arrays"] = self.refs
-        blob = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+        # Strict JSON only: NaN / Infinity are not JSON, and a browser's
+        # JSON.parse rejects the whole file over one of them (Python's
+        # json.loads would not have noticed). Non-finite numbers in the
+        # manifest are written as null — the documented convention
+        # (docs/mtj-format.md, "Numbers"); arrays in the blob keep IEEE values.
+        blob = json.dumps(finite_json(manifest), ensure_ascii=False,
+                          allow_nan=False).encode("utf-8")
         pad = (-(12 + len(blob))) % _ALIGN
         blob += b" " * pad
         fh.write(MAGIC)
@@ -80,39 +91,99 @@ def _write(path_or_fh, manifest: dict, writer: _Writer) -> None:
             writer.write(fh, manifest)
 
 
-def read_container(path_or_fh) -> tuple[dict, dict[str, np.ndarray]]:
-    """Parse any .mtj file: (manifest, {array name -> numpy array})."""
+def finite_json(value):
+    """A copy of `value` that is strict JSON: every NaN / ±Infinity becomes
+    None (null), numpy scalars become Python numbers. The convention every
+    writer of .mtj manifests follows (docs/mtj-format.md, "Numbers")."""
+    if isinstance(value, dict):
+        return {k: finite_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [finite_json(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return finite_json(value.tolist())
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _read_raw(path_or_fh) -> bytes:
     if hasattr(path_or_fh, "read"):
-        raw = path_or_fh.read()
-    else:
-        raw = Path(path_or_fh).read_bytes()
-    if raw[:4] != MAGIC:
+        return path_or_fh.read()
+    return Path(path_or_fh).read_bytes()
+
+
+def _parse_at(raw: bytes, pos: int) -> tuple[dict, dict[str, np.ndarray], int]:
+    """Parse the container starting at `pos`: (manifest, arrays, end).
+
+    `end` is where the container's last array ends — a container is
+    self-delimiting, which is what lets several be concatenated into one
+    stream (`mottled capture` writes one per prompt)."""
+    if len(raw) - pos < 12 or raw[pos:pos + 4] != MAGIC:
         raise ValueError("not a .mtj file (bad magic)")
-    version, mlen = struct.unpack_from("<II", raw, 4)
+    version, mlen = struct.unpack_from("<II", raw, pos + 4)
     if version != VERSION:
         raise ValueError(f"unsupported .mtj version {version} (reader supports {VERSION})")
-    manifest = json.loads(raw[12 : 12 + mlen].decode("utf-8"))
-    blob = raw[12 + mlen :]
-    arrays = {}
+    start = pos + 12 + mlen
+    if start > len(raw):
+        raise ValueError("truncated .mtj: the manifest runs past the end of the file")
+    manifest = json.loads(raw[pos + 12 : start].decode("utf-8"))
+    arrays, end = {}, start
     for name, ref in manifest.get("arrays", {}).items():
+        lo, hi = start + ref["offset"], start + ref["offset"] + ref["length"]
+        end = max(end, hi)
         dtype = _DTYPES.get(ref["dtype"])
         if dtype is None:  # unknown dtype from a newer writer: skip, stay stable
             continue
-        buf = blob[ref["offset"] : ref["offset"] + ref["length"]]
-        arrays[name] = np.frombuffer(buf, dtype=np.dtype(dtype).newbyteorder("<")) \
+        if hi > len(raw):
+            raise ValueError(f"truncated .mtj: array {name!r} runs past the end of the file")
+        arrays[name] = np.frombuffer(raw[lo:hi], dtype=np.dtype(dtype).newbyteorder("<")) \
             .reshape(ref["shape"]).astype(dtype)
+    return manifest, arrays, end
+
+
+def read_container(path_or_fh) -> tuple[dict, dict[str, np.ndarray]]:
+    """Parse any .mtj file: (manifest, {array name -> numpy array}).
+
+    Reads the first container; anything after it (a stream's further
+    containers) is left alone — see `read_stream`."""
+    manifest, arrays, _ = _parse_at(_read_raw(path_or_fh), 0)
     return manifest, arrays
+
+
+def iter_containers(raw: bytes) -> Iterator[tuple[dict, dict[str, np.ndarray]]]:
+    """Every container in a .mtj stream: one or more containers back to back.
+
+    Trailing padding (NUL or space bytes) after the last container is
+    tolerated; any other trailing bytes are an error."""
+    pos = 0
+    while True:
+        manifest, arrays, end = _parse_at(raw, pos)
+        yield manifest, arrays
+        pos = end
+        if not raw[pos:].strip(b"\x00 "):
+            return
+
+
+def read_stream(path_or_fh) -> list[tuple[dict, dict[str, np.ndarray]]]:
+    """All containers of a .mtj stream (a plain file is a stream of one)."""
+    return list(iter_containers(_read_raw(path_or_fh)))
 
 
 # ------------------------------------------------------------- trajectory IO
 def save(traj: StateTrajectory, path_or_fh, include_logits: bool = True,
-         include_embeddings: bool = True, analysis: dict | None = None) -> None:
+         include_embeddings: bool = True, analysis: dict | None = None,
+         inspector: dict | None = None) -> None:
     """Serialize one StateTrajectory at full fidelity (kind: "trajectory").
 
     `include_logits` / `include_embeddings` drop the two largest optional
     arrays for smaller files; everything else always round-trips. `analysis`
     is an analysis record (`provenance.record`) to carry with the file — the
     archival counterpart of what `save_scene` writes for a shared scene.
+    `inspector` is a precomputed `pipeline.inspector_entry` — the compact
+    stand-in for the (V, D) embedding matrix that lets a file written
+    without it still produce a full scene (`mottled capture | mottled project`).
     """
     w = _Writer()
     w.add("hidden", traj.hidden.astype(np.float32))
@@ -130,6 +201,7 @@ def save(traj: StateTrajectory, path_or_fh, include_logits: bool = True,
 
     manifest: dict[str, Any] = {
         "format": "mottled-trajectory",
+        "schema": TRAJECTORY_SCHEMA,
         "version": VERSION,
         "kind": "trajectory",
         "meta": _jsonable(traj.meta),
@@ -142,12 +214,56 @@ def save(traj: StateTrajectory, path_or_fh, include_logits: bool = True,
                             for layer in traj.topk]
     if analysis:
         manifest["analysis"] = _jsonable(analysis)
+    if inspector:
+        block = _inspector_block(inspector, w, "")
+        if block:
+            manifest["inspector"] = block
     _write(path_or_fh, manifest, w)
 
 
 def load(path_or_fh) -> StateTrajectory:
     """Read a kind:"trajectory" .mtj back into a StateTrajectory."""
     manifest, arrays = read_container(path_or_fh)
+    return _trajectory_from(manifest, arrays)
+
+
+def load_stream(path_or_fh) -> list[tuple[StateTrajectory, dict | None, dict]]:
+    """Every trajectory in a .mtj stream: (trajectory, inspector entry or
+    None, manifest) per container. The inspector entry is in the shape
+    `pipeline.inspector_entry` returns, ready for `save_scene`."""
+    out = []
+    for manifest, arrays in read_stream(path_or_fh):
+        traj = _trajectory_from(manifest, arrays)
+        out.append((traj, _inspector_entry(manifest.get("inspector"), arrays), manifest))
+    return out
+
+
+def _inspector_block(e: dict, w: _Writer, prefix: str) -> dict:
+    block: dict[str, Any] = {}
+    if "neighbor_idx" in e:
+        block["tokens"] = list(e["neighbor_tokens"])
+        block["idx"] = w.add(f"{prefix}inspector.nidx", np.asarray(e["neighbor_idx"], np.int32))
+        block["sim"] = w.add(f"{prefix}inspector.nsim", np.asarray(e["neighbor_sim"], np.float32))
+    if "component_shares" in e:
+        block["component_shares"] = w.add(
+            f"{prefix}inspector.shares", np.asarray(e["component_shares"], np.float32))
+    return block
+
+
+def _inspector_entry(block, arrays) -> dict | None:
+    if not isinstance(block, dict):
+        return None
+    e: dict[str, Any] = {}
+    if block.get("idx") in arrays and block.get("sim") in arrays:
+        e["neighbor_tokens"] = list(block.get("tokens", []))
+        e["neighbor_idx"] = arrays[block["idx"]]
+        e["neighbor_sim"] = arrays[block["sim"]]
+    if block.get("component_shares") in arrays:
+        e["component_shares"] = arrays[block["component_shares"]]
+    return e or None
+
+
+def _trajectory_from(manifest: dict, arrays: dict) -> StateTrajectory:
     if manifest.get("kind") != "trajectory":
         raise ValueError(f"expected kind 'trajectory', got {manifest.get('kind')!r}")
     components = {name.split(".", 1)[1]: arr for name, arr in arrays.items()
@@ -231,17 +347,7 @@ def save_scene(result: dict, path_or_fh) -> None:
             # inspector layers the viewer cannot recompute (pipeline.
             # attach_inspector): nearest vocabulary tokens per state, and the
             # attn/MLP share of each block's write — additive
-            e, block = insp[i], {}
-            if "neighbor_idx" in e:
-                block["tokens"] = list(e["neighbor_tokens"])
-                block["idx"] = w.add(f"run{i}.inspector.nidx",
-                                     np.asarray(e["neighbor_idx"], np.int32))
-                block["sim"] = w.add(f"run{i}.inspector.nsim",
-                                     np.asarray(e["neighbor_sim"], np.float32))
-            if "component_shares" in e:
-                block["component_shares"] = w.add(
-                    f"run{i}.inspector.shares",
-                    np.asarray(e["component_shares"], np.float32))
+            block = _inspector_block(insp[i], w, f"run{i}.")
             if block:
                 run["inspector"] = block
 
@@ -264,6 +370,7 @@ def save_scene(result: dict, path_or_fh) -> None:
 
     manifest: dict[str, Any] = {
         "format": "mottled-trajectory",
+        "schema": SCENE_SCHEMA,
         "version": VERSION,
         "kind": "scene",
         "meta": _jsonable(trajs[0].meta),
@@ -358,6 +465,7 @@ def _jsonable(meta: dict) -> dict:
     """Best-effort JSON-safe copy of a meta dict (drop what can't serialize)."""
     out = {}
     for key, value in meta.items():
+        value = finite_json(value)          # numpy scalars/arrays, NaN -> null
         try:
             json.dumps(value)
             out[key] = value

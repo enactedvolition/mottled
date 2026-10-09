@@ -43,3 +43,34 @@ FONT_MONO = "JetBrains Mono, SF Mono, Menlo, Consolas, monospace"
 # The subset the mirrors (config.toml, viewer/style.css) must agree on, so the
 # guard test knows exactly what to cross-check.
 SHARED = {"base": BASE, "surface_0": SURFACE_0, "accent": ACCENT, "fg_1": FG_1}
+
+# The viewer's CSS custom properties (viewer/style.css :root), in order. That
+# block, viewer/tokens.js and .streamlit/config.toml are *generated* from this
+# module by `python -m codegen`; tests/test_codegen.py fails if any drifts.
+CSS_ROOT = {
+    "color-base": BASE,
+    "color-surface-0": SURFACE_0,
+    "color-surface-1": SURFACE_1,
+    "color-panel": "rgba(12, 16, 32, 0.92)",
+    "color-border": BORDER,
+    "color-border-strong": BORDER_STRONG,
+    "color-fg-1": FG_1,
+    "color-fg-2": FG_2,
+    "color-accent": ACCENT,
+    "color-accent-subtle": "rgba(75, 124, 243, 0.08)",
+    "color-loss": RED,
+    "color-amber": AMBER,
+    "color-live": TEAL,
+    "radius-xs": "2px",
+    "radius-sm": "3px",
+    "ease-precision": "cubic-bezier(0.16, 1, 0.3, 1)",
+}
+
+# .streamlit/config.toml [theme]
+STREAMLIT_THEME = {
+    "base": "dark",
+    "primaryColor": ACCENT,
+    "backgroundColor": BASE,
+    "secondaryBackgroundColor": SURFACE_0,
+    "textColor": FG_1,
+}

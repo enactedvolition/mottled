@@ -226,18 +226,14 @@ def test_export_writes_the_record_into_the_scene_and_beside_it(tmp_path, monkeyp
     """`mottled export` always embeds the record; `--manifest` also writes it
     out as the standalone JSON a methods section can cite."""
     import cli
-    import ui
 
-    cfg = MarbleConfig(model="tiny", use_cache=False, density_bootstrap=0)
-    monkeypatch.setattr(ui, "run_scene",
-                        lambda _cfg, prompts, **kw: run_scene(cfg, prompts,
-                                                              **synthetic.mt()))
+    model_dir = synthetic.save_to(tmp_path / "tiny")
     scene, sidecar = tmp_path / "scene.mtj", tmp_path / "methods.json"
-    assert cli.main(["export", PROMPT, "--model", "tiny",
+    assert cli.main(["export", PROMPT, "--model", model_dir,
                      "-o", str(scene), "--manifest", str(sidecar)]) == 0
 
     embedded = F.load_scene(scene)["analysis"]
-    assert embedded["config"]["model"] == "tiny"
+    assert embedded["config"]["model"] == model_dir
     assert embedded["prompts"] == [PROMPT]
     assert json.loads(sidecar.read_text()) == embedded
 

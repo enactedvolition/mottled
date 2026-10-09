@@ -58,9 +58,9 @@ mottled-convert-sae = "convert_sae:main"
 # `attractor` and `mweights` were missing here, which left a pip-installed
 # Mottled unable to `import ui` at all — the explorer, the flat API and
 # `mottled serve` all failed on an install that looked fine in a clone.
-py-modules = ["attractor", "blast", "bvh", "cache", "capture", "cli", "compare",
-              "config", "convert_sae", "crossmodel", "density", "design_tokens",
-              "dose", "intervene", "metrics", "mweights", "neighbors", "parity",
+py-modules = ["attractor", "blast", "bvh", "cache", "capture", "cli", "codegen",
+              "compare", "config", "convert_sae", "crossmodel", "density", "design_tokens",
+              "dose", "intervene", "metrics", "mtjschema", "mweights", "neighbors", "parity",
               "pipeline", "projection", "provenance", "remote", "render", "sae",
               "serve", "smoke", "statefile", "stream", "terrain", "trajectory",
               "ui"]

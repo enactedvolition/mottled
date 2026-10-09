@@ -163,3 +163,15 @@ def mt(n_layers: int = 13, dim: int = 32, seed: int = 0) -> dict:
     """
     return {"model": model(n_layers=n_layers - 1, dim=dim, seed=seed),
             "tokenizer": tokenizer()}
+
+
+def save_to(path, n_layers: int = 4, dim: int = 32, seed: int = 0) -> str:
+    """Write a tiny model + tokenizer to `path` as a HF checkpoint directory,
+    so code that loads by name (the CLI's `--model DIR`) runs it offline.
+    `n_layers` counts captured layers, as in `capture`."""
+    from pathlib import Path
+
+    Path(path).mkdir(parents=True, exist_ok=True)
+    model(n_layers=n_layers - 1, dim=dim, seed=seed).save_pretrained(path)
+    tokenizer().save_pretrained(path)
+    return str(path)

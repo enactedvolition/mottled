@@ -25,9 +25,79 @@ import provenance as provenance_mod
 import sae as sae_mod
 import terrain as terrain_mod
 import trajectory as trajectory_mod
-from capture import capture, generate_and_capture
 from config import MarbleConfig
 from trajectory import StateTrajectory
+
+def capture(*args, **kwargs):
+    """`capture.capture`, imported on first use: torch is a capture-time
+    dependency, so a projection-only consumer (`mottled project`) never pays
+    for importing it."""
+    import capture as capture_mod
+
+    return capture_mod.capture(*args, **kwargs)
+
+
+def generate_and_capture(*args, **kwargs):
+    """`capture.generate_and_capture`, imported on first use (see `capture`)."""
+    import capture as capture_mod
+
+    return capture_mod.generate_and_capture(*args, **kwargs)
+
+
+# Config fields that cannot change a computed artifact: where the cache lives,
+# whether it is used, and display-only knobs. Everything else in MarbleConfig
+# is in the cache key *by construction* — a new field is keyed the day it is
+# added, instead of the day someone notices a stale scene.
+_UNKEYED_FIELDS = frozenset({"cache_dir", "use_cache", "frame_ms"})
+
+
+def cache_key(tag: str, cfg: MarbleConfig, prompts, model=None, **extra) -> str:
+    """The disk-cache key for a pipeline artifact.
+
+    Complete by construction: every `MarbleConfig` field except
+    `_UNKEYED_FIELDS` (so dtype, device, keep_logits, grid_padding,
+    marble_lift … are all in it), plus the Mottled version and the model
+    revision the weights resolve to, since either can move every number.
+    """
+    knobs = {k: v for k, v in cfg.to_dict().items() if k not in _UNKEYED_FIELDS}
+    return cache_mod.make_key(tag, prompts, knobs,
+                              mottled=provenance_mod._version(),
+                              revision=model_revision(cfg.model, model), **extra)
+
+
+def model_revision(name: str, model=None) -> str | None:
+    """Best-effort identity of the weights `name` resolves to, without
+    loading them: the hub commit (from an in-memory model's config, or the
+    local hub cache's snapshot directory), or for a local checkpoint
+    directory a fingerprint of its files' sizes and mtimes. None when it
+    cannot be known offline (a hub model not yet downloaded)."""
+    import hashlib
+    from pathlib import Path
+
+    if model is not None:
+        commit = getattr(getattr(model, "config", None), "_commit_hash", None)
+        if commit:
+            return str(commit)
+    path = Path(str(name)).expanduser()
+    if path.is_dir():
+        h = hashlib.sha256()
+        for f in sorted(path.iterdir()):
+            if f.is_file():
+                st = f.stat()
+                h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns};".encode())
+        return "local:" + h.hexdigest()[:16]
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        hit = try_to_load_from_cache(str(name), "config.json")
+    except Exception:  # not installed, or not a repo id
+        return None
+    if isinstance(hit, str):
+        parts = Path(hit).parts
+        if "snapshots" in parts:
+            return parts[parts.index("snapshots") + 1]
+    return None
+
 
 # Pipeline: capture -> project -> compute_density -> mesh -> trajectory
 # --------------------------------------------------------------------------
@@ -44,14 +114,7 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
     # the same text can stand for different ids, so ids are part of the key;
     # passed only when given, so every other key is what it was
     ids = {} if input_ids is None else {"input_ids": [int(i) for i in input_ids]}
-    key = cache_mod.make_key("pipeline-v6", prompt, cfg.model, cfg.projection,
-                             cfg.density, cfg.top_k, cfg.n_components, cfg.seed,
-                             cfg.grid_size, cfg.smooth_sigma, cfg.height_scale,
-                             cfg.invert_terrain, cfg.trajectory_mode,
-                             cfg.trajectory_token, cfg.frames_per_layer,
-                             cfg.capture_components, cfg.capture_attention,
-                             cfg.density_bootstrap, cfg.generate_tokens,
-                             cfg.generate_temperature, **ids)
+    key = cache_key("pipeline-v7", cfg, prompt, model=model, **ids)
     if disk is not None and (hit := disk.get(key)) is not None:
         return hit
 
@@ -241,14 +304,7 @@ def run_scene(cfg: MarbleConfig, prompts: list[str], model=None, tokenizer=None)
     if not prompts:
         raise ValueError("run_scene needs at least one prompt")
     disk = cache_mod.DiskCache(cfg.cache_dir) if cfg.use_cache else None
-    key = cache_mod.make_key("scene-v4", prompts, cfg.model, cfg.projection,
-                             cfg.density, cfg.top_k, cfg.n_components, cfg.seed,
-                             cfg.grid_size, cfg.smooth_sigma, cfg.height_scale,
-                             cfg.invert_terrain, cfg.trajectory_mode,
-                             cfg.trajectory_token, cfg.frames_per_layer,
-                             cfg.capture_components, cfg.capture_attention,
-                             cfg.density_bootstrap, cfg.generate_tokens,
-                             cfg.generate_temperature)
+    key = cache_key("scene-v5", cfg, list(prompts), model=model)
     if disk is not None and (hit := disk.get(key)) is not None:
         return hit
 
@@ -259,6 +315,47 @@ def run_scene(cfg: MarbleConfig, prompts: list[str], model=None, tokenizer=None)
     if disk is not None:
         disk.put(key, result)
     return result
+
+
+def capture_trajectories(cfg: MarbleConfig, prompts: list[str], model=None,
+                         tokenizer=None) -> list[StateTrajectory]:
+    """The capture stage alone: one validated trajectory per prompt.
+
+    `mottled capture` writes these; `project_trajectories` turns them into a
+    scene. `run_scene` is the two composed (plus the cache)."""
+    if not prompts:
+        raise ValueError("capture needs at least one prompt")
+    if model is None:
+        from capture import load_model
+
+        model, tokenizer = load_model(cfg.model, device=cfg.device, dtype=cfg.dtype)
+    return [_capture_with(cfg, p, model=model, tokenizer=tokenizer) for p in prompts]
+
+
+def project_trajectories(cfg: MarbleConfig, trajs: list[StateTrajectory],
+                         inspectors: list | None = None,
+                         prompts: list[str] | None = None) -> dict:
+    """The project stage alone: trajectories -> an exportable scene result.
+
+    Joint projection, terrain and comparisons (`_assemble_scene`), the
+    inspector layers (precomputed ones from `inspectors` are used as given;
+    the rest are computed from the trajectory's embedding matrix), and the
+    analysis record. `mottled capture | mottled project` and `mottled
+    export` both end here, which is what makes them the same scene.
+    """
+    if not trajs:
+        raise ValueError("project needs at least one trajectory")
+    if prompts is None:
+        prompts = [str(t.meta.get("prompt", "")) for t in trajs]
+    result = {"prompts": list(prompts), "prompt": prompts[0], **_assemble_scene(cfg, trajs)}
+    if len(prompts) == 2:
+        result["prompt_b"] = prompts[1]
+    given = list(inspectors or [])
+    result["inspector_list"] = [
+        given[i] if i < len(given) and given[i] is not None else inspector_entry(t)
+        for i, t in enumerate(trajs)
+    ]
+    return attach_manifest(result, cfg)
 
 
 def degraded_note(meta: dict) -> str | None:
@@ -330,39 +427,43 @@ def attach_inspector(result: dict, n_neighbors: int = 5) -> dict:
     Runs lacking the source data are skipped individually rather than
     failing the export.
     """
+    trajs = result.get("trajs") or [result["traj"]]
+    result["inspector_list"] = [inspector_entry(t, n_neighbors) for t in trajs]
+    return result
+
+
+def inspector_entry(traj: StateTrajectory, n_neighbors: int = 5) -> dict:
+    """One run's inspector layers (see `attach_inspector`): nearest
+    vocabulary tokens per state and the attn/MLP share per state, each
+    present only when the trajectory carries its source data."""
     from neighbors import TokenNeighbors
 
-    trajs = result.get("trajs") or [result["traj"]]
-    out = []
-    for traj in trajs:
-        entry: dict = {}
+    entry: dict = {}
 
-        if traj.embedding_matrix is not None and traj.vocab:
-            tn = TokenNeighbors(traj.embedding_matrix, traj.vocab)
-            flat = traj.hidden.reshape(-1, traj.dim)
-            table: dict[str, int] = {}
-            idx = np.zeros((len(flat), n_neighbors), dtype=np.int32)
-            sim = np.zeros((len(flat), n_neighbors), dtype=np.float32)
-            for i, vec in enumerate(flat):
-                for j, (tok, s) in enumerate(tn.nearest(vec, k=n_neighbors)):
-                    idx[i, j] = table.setdefault(tok, len(table))
-                    sim[i, j] = s
-            shape = (traj.n_layers, traj.n_tokens, n_neighbors)
-            entry["neighbor_tokens"] = list(table)
-            entry["neighbor_idx"] = idx.reshape(shape)
-            entry["neighbor_sim"] = sim.reshape(shape)
+    if traj.embedding_matrix is not None and traj.vocab:
+        tn = TokenNeighbors(traj.embedding_matrix, traj.vocab)
+        flat = traj.hidden.reshape(-1, traj.dim)
+        table: dict[str, int] = {}
+        idx = np.zeros((len(flat), n_neighbors), dtype=np.int32)
+        sim = np.zeros((len(flat), n_neighbors), dtype=np.float32)
+        for i, vec in enumerate(flat):
+            for j, (tok, s) in enumerate(tn.nearest(vec, k=n_neighbors)):
+                idx[i, j] = table.setdefault(tok, len(table))
+                sim[i, j] = s
+        shape = (traj.n_layers, traj.n_tokens, n_neighbors)
+        entry["neighbor_tokens"] = list(table)
+        entry["neighbor_idx"] = idx.reshape(shape)
+        entry["neighbor_sim"] = sim.reshape(shape)
 
-        comps = traj.components
-        if comps is not None and {"attn", "mlp"} <= set(comps):
-            a = np.linalg.norm(comps["attn"].astype(np.float64), axis=-1)
-            m = np.linalg.norm(comps["mlp"].astype(np.float64), axis=-1)
-            total = np.maximum(a + m, 1e-12)
-            entry["component_shares"] = np.stack(
-                [a / total, m / total], axis=-1).astype(np.float32)
+    comps = traj.components
+    if comps is not None and {"attn", "mlp"} <= set(comps):
+        a = np.linalg.norm(comps["attn"].astype(np.float64), axis=-1)
+        m = np.linalg.norm(comps["mlp"].astype(np.float64), axis=-1)
+        total = np.maximum(a + m, 1e-12)
+        entry["component_shares"] = np.stack(
+            [a / total, m / total], axis=-1).astype(np.float32)
 
-        out.append(entry)
-    result["inspector_list"] = out
-    return result
+    return entry
 
 
 def attach_manifest(result: dict, cfg: MarbleConfig, sae=None,
