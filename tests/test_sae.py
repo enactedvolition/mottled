@@ -697,3 +697,22 @@ def test_feature_field_names_domains_but_colours_by_identity():
     assert _feature_hue(top) == _feature_hue(top)
     assert float(_feature_hue(np.array([top]))[0]) == pytest.approx(
         (top * 0.6180339887498949) % 1.0)
+
+
+def test_failed_label_lookups_are_reported_not_dropped(tmp_path, capsys):
+    """Offline is not an error, but it must not be silent: one line on stderr
+    says how many lookups failed and why."""
+    calls = []
+
+    def flaky(url):
+        calls.append(url)
+        if len(calls) % 2:
+            raise TimeoutError("timed out")
+        return {"explanations": [{"description": "a capital city"}]}
+
+    src = ("jbloom/GPT2-Small-SAEs-Reformatted", "blocks.8.hook_resid_pre")
+    got = S.fetch_labels([1, 2, 3, 4], source=src, cache_dir=tmp_path, fetch=flaky)
+    assert sorted(got) == [2, 4]
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert "2 of 4 Neuronpedia label lookups failed" in err and "TimeoutError" in err

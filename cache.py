@@ -9,9 +9,37 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
+import sys
 from pathlib import Path
 from typing import Any
+
+
+def default_dir(kind: str | None = None) -> Path:
+    """Mottled's per-user cache root (or its `kind` subdirectory).
+
+    Resolution order, first hit wins:
+      1. ``$MOTTLED_CACHE_DIR`` (``$MOTTLED_CACHE``, the older name, also works)
+      2. ``$XDG_CACHE_HOME/mottled``
+      3. the platform's cache home: ``~/Library/Caches/mottled`` (macOS),
+         ``%LOCALAPPDATA%\\mottled\\Cache`` (Windows), ``~/.cache/mottled``
+
+    Never the working directory: a cache that follows `cwd` is a cache two
+    projects silently share or one project silently loses.
+    """
+    env = os.environ.get("MOTTLED_CACHE_DIR") or os.environ.get("MOTTLED_CACHE")
+    if env:
+        root = Path(env).expanduser()
+    elif os.environ.get("XDG_CACHE_HOME"):
+        root = Path(os.environ["XDG_CACHE_HOME"]).expanduser() / "mottled"
+    elif sys.platform == "darwin":
+        root = Path.home() / "Library" / "Caches" / "mottled"
+    elif os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        root = Path(os.environ["LOCALAPPDATA"]) / "mottled" / "Cache"
+    else:
+        root = Path.home() / ".cache" / "mottled"
+    return root / kind if kind else root
 
 
 def make_key(*parts: Any, **kw: Any) -> str:
@@ -21,8 +49,8 @@ def make_key(*parts: Any, **kw: Any) -> str:
 
 
 class DiskCache:
-    def __init__(self, directory: str | Path = ".marble_cache"):
-        self.dir = Path(directory)
+    def __init__(self, directory: str | Path | None = None):
+        self.dir = Path(directory) if directory else default_dir("pipeline")
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, key: str) -> Path:

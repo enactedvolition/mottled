@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/enactedvolition/mottled/main/docs/schema/mottled-scene-1.schema.json",
+  "title": "mottled-scene/1",
+  "description": "Manifest of a kind:\"scene\" .mtj container: a viewer-ready bundle (docs/mtj-format.md). Unknown fields are allowed and must be ignored by readers.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "kind",
+    "terrain",
+    "runs",
+    "arrays"
+  ],
+  "properties": {
+    "format": {
+      "const": "mottled-trajectory",
+      "description": "the container family (both kinds share it)"
+    },
+    "schema": {
+      "const": "mottled-scene/1",
+      "description": "this schema's id; absent in files written before schema ids existed"
+    },
+    "version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "scene"
+    },
+    "meta": {
+      "type": "object"
+    },
+    "analysis": {
+      "$ref": "#/$defs/analysis"
+    },
+    "arrays": {
+      "$ref": "#/$defs/arrays"
+    },
+    "terrain": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        },
+        "y": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        },
+        "z": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        },
+        "density": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        },
+        "se": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "tokens",
+          "points"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tokens": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trajectory_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "points": {
+            "type": "string",
+            "minLength": 1,
+            "x-mtj-array": true,
+            "description": "(trajectories, points, 3) draped paths"
+          },
+          "entropy": {
+            "type": "string",
+            "minLength": 1,
+            "x-mtj-array": true,
+            "description": "(layers, tokens)"
+          },
+          "quality": {
+            "type": "string",
+            "minLength": 1,
+            "x-mtj-array": true,
+            "description": "(layers, tokens) neighborhood preservation"
+          },
+          "attention": {
+            "type": "string",
+            "minLength": 1,
+            "x-mtj-array": true,
+            "description": "(layers-1, tokens, tokens)"
+          },
+          "topk": {
+            "$ref": "#/$defs/topk"
+          },
+          "generation": {
+            "type": "object"
+          },
+          "inspector": {
+            "$ref": "#/$defs/inspector"
+          },
+          "features": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hook": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "best_layer": {
+                "type": "integer"
+              },
+              "recon_error": {
+                "type": "string",
+                "minLength": 1,
+                "x-mtj-array": true,
+                "description": "name of an entry in `arrays`"
+              },
+              "top_id": {
+                "type": "string",
+                "minLength": 1,
+                "x-mtj-array": true,
+                "description": "name of an entry in `arrays`"
+              },
+              "top_act": {
+                "type": "string",
+                "minLength": 1,
+                "x-mtj-array": true,
+                "description": "name of an entry in `arrays`"
+              }
+            }
+          }
+        }
+      }
+    },
+    "comparisons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "hausdorff": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "dtw_normalized": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "shared_tokens": {
+            "type": "integer"
+          },
+          "onset_layer": {
+            "type": "integer"
+          },
+          "readout_changed": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "blast": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "type": "string",
+          "pattern": "^mottled-blast/[0-9]+$"
+        },
+        "layouts": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "arrayRef": {
+      "type": "object",
+      "description": "where one typed array lives in the blob",
+      "required": [
+        "dtype",
+        "shape",
+        "offset",
+        "length"
+      ],
+      "properties": {
+        "dtype": {
+          "type": "string",
+          "description": "float16 | float32 | int32; readers skip arrays of a dtype they do not know"
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "byte offset from the start of the blob; a multiple of 16"
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "byte length = product(shape) x item size"
+        }
+      }
+    },
+    "arrays": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/arrayRef"
+      }
+    },
+    "topk": {
+      "type": "array",
+      "description": "[layer][token][rank] = [token, probability]",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "inspector": {
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "idx": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        },
+        "sim": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        },
+        "component_shares": {
+          "type": "string",
+          "minLength": 1,
+          "x-mtj-array": true,
+          "description": "name of an entry in `arrays`"
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "description": "the analysis record (provenance.record): what produced the file",
+      "required": [
+        "schema",
+        "created",
+        "mottled",
+        "config"
+      ],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "pattern": "^mottled-analysis/[0-9]+$"
+        },
+        "created": {
+          "type": "string"
+        },
+        "mottled": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "type": "object"
+        },
+        "prompts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

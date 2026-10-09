@@ -23,11 +23,35 @@ Array `offset`s in the manifest are relative to the **start of the blob**
 A JavaScript reader needs only `DataView` + `TypedArray`; a Python reader
 needs only `struct` + `numpy.frombuffer`. No compression, no dependencies.
 
+### Streams: several containers back to back
+
+A container is self-delimiting: it ends where its last array ends
+(`12 + M + max(offset + length)` over its arrays; `12 + M` when it has
+none). So containers can be concatenated, and a **`.mtj` stream** is just
+that: `mottled capture` writes one `kind: "trajectory"` container per
+prompt, and `cat a.mtj b.mtj | mottled project` reads both. A reader of a
+plain file reads the first container and may ignore the rest; a stream
+reader (`statefile.read_stream`, `mottled inspect`, `mottled validate`)
+reads containers until the end. Trailing NUL or space padding after the
+last container is allowed; any other trailing bytes are an error.
+
+### Numbers: strict JSON, non-finite values as `null`
+
+The manifest is strict JSON (RFC 8259). `NaN` and `Infinity` are not JSON,
+and a browser's `JSON.parse` rejects a whole file over one of them, so
+writers MUST write every non-finite number in the manifest as `null`
+(e.g. an unknown temperature, an AUROC on a layer that is one point).
+Readers treat `null` in a numeric field as "not a number". The binary
+arrays are unaffected: they hold IEEE-754 values, NaN included.
+Files written before this rule may contain a bare `NaN`; `mottled validate`
+reports them as errors, and the Python reader still loads them.
+
 ## Manifest
 
 ```jsonc
 {
   "format": "mottled-trajectory",
+  "schema": "mottled-trajectory/1",  // or "mottled-scene/1": see below
   "version": 1,
   "kind": "trajectory",              // or "scene"
   "meta": { "model": "gpt2", "prompt": "…", "backend": "transformers", … },
@@ -42,6 +66,29 @@ Array references always carry `dtype` (`float16` | `float32` | `int32`),
 `shape`, `offset`, and `length` (bytes; equals the product of the shape and
 the item size). Readers MUST ignore unknown manifest fields and unknown
 arrays — that is how the format stays stable while growing.
+
+### Schema ids and the published schemas
+
+Each manifest names its schema: `"schema": "mottled-scene/1"` for
+`kind: "scene"`, `"mottled-trajectory/1"` for `kind: "trajectory"`. The key
+is additive — files written before it existed simply lack it and stay
+valid (`mottled validate` warns; `--strict` makes it an error). The number
+changes only on a breaking change to that kind's manifest.
+
+The JSON Schemas (draft 2020-12) are published in
+[`docs/schema/`](schema/):
+[`mottled-scene-1.schema.json`](schema/mottled-scene-1.schema.json) and
+[`mottled-trajectory-1.schema.json`](schema/mottled-trajectory-1.schema.json).
+They are **generated** from `mtjschema.py` by `python -m codegen` and
+checked in CI, so they cannot drift from the validator. Strings that name
+an array carry the annotation `"x-mtj-array": true`. A schema can say what
+a manifest looks like but not whether the bytes agree with it, so
+`mottled validate` also checks: the header and magic, strict JSON, 16-byte
+alignment of every array, `length = product(shape) × item size`, every
+array lying inside the blob, every array reference resolving, the shapes
+agreeing (`tokens` vs `T`, `entropy` / `quality` as `(L, T)`), and finite
+hidden states. Any language can write `.mtj`; `mottled validate FILE` is the
+conformance check.
 
 ## `analysis` — the record of what produced the file *(optional)*
 
@@ -108,6 +155,12 @@ Round-trips a `StateTrajectory` at full fidelity. Fields:
   - `attention` — `(L-1, T, T)` float32,
   - `components.attn`, `components.mlp` — `(L-1, T, D)` float32,
   - `embedding_matrix` — `(V, D)` float32.
+- `inspector` *(optional)*: the inspector layers precomputed from the
+  embedding matrix and components, in the same shape as a scene run's
+  `inspector` (below) with arrays `inspector.nidx` / `inspector.nsim` /
+  `inspector.shares`. `mottled capture` writes it and, by default, omits
+  `embedding_matrix` and `vocab` — they are tens of MB for a real model and
+  the inspector is all a scene needs from them (`--full` keeps both).
 
 ## `kind: "scene"` — a viewer-ready bundle
 

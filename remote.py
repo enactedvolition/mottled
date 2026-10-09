@@ -87,8 +87,9 @@ class RemoteWeights:
         if cache_dir:
             self.cache = Path(cache_dir)
         else:
-            root = os.environ.get("MOTTLED_CACHE", Path.home() / ".cache" / "mottled")
-            self.cache = Path(root) / "remote"
+            import cache as cache_mod
+
+            self.cache = cache_mod.default_dir("remote")
         self.cache.mkdir(parents=True, exist_ok=True)
         self.cache_bytes = cache_bytes
         self.coalesce_gap = int(coalesce_gap)
@@ -108,6 +109,13 @@ class RemoteWeights:
 
         self._headers: dict[str, tuple[dict, int]] = {}
         self._files: list[Path] = []          # LRU of cached layer files
+        # The hub commit the files resolved to, when the host says
+        # (X-Repo-Commit). Every cache file is keyed by it plus the base URL
+        # (which carries repo and revision): one cache directory serves many
+        # repos, and a file name alone ("model.safetensors", a layer prefix)
+        # names the same thing in every one of them.
+        self.commit: str | None = None
+        self._key: str | None = None
         self.map = self._load_index()
 
     # ------------------------------------------------------------ transport
@@ -151,6 +159,9 @@ class RemoteWeights:
                     raise RuntimeError(f"{url} announced {sent} bytes for a "
                                        f"{want}-byte range")
                 self.requests_made += 1
+                commit = r.headers.get("X-Repo-Commit")
+                if commit and self.commit is None:
+                    self.commit = commit
                 if sink is None:
                     body = r.content
                     self.bytes_fetched += len(body)
@@ -184,6 +195,18 @@ class RemoteWeights:
         header, _ = self._header(_SINGLE)
         return {k: _SINGLE for k in header if k != "__metadata__"}
 
+    @property
+    def key(self) -> str:
+        """Cache-file prefix for this source: a hash of the base URL (repo +
+        revision) and, when known, the commit it resolved to. Fixed at first
+        use, so files written in one session stay addressable in it."""
+        if self._key is None:
+            import hashlib
+
+            ident = f"{self.base}@{self.commit or ''}"
+            self._key = hashlib.sha256(ident.encode()).hexdigest()[:16]
+        return self._key
+
     def _header(self, filename: str) -> tuple[dict, int]:
         """The safetensors header, cached. Two small requests, once per shard.
 
@@ -193,7 +216,7 @@ class RemoteWeights:
         """
         if filename in self._headers:
             return self._headers[filename]
-        cached = self.cache / f"{filename.replace('/', '_')}.header.json"
+        cached = self.cache / f"{self.key}-{filename.replace('/', '_')}.header.json"
         if cached.exists():
             blob = json.loads(cached.read_text())
             got = (blob["header"], blob["offset"])
@@ -289,7 +312,7 @@ class RemoteWeights:
 
         blob = json.dumps(header, separators=(",", ":")).encode()
         blob += b" " * (-(len(blob) + 8) % 8)        # keep the data 8-aligned
-        path = self.cache / f"{prefix.strip('.').replace('.', '_') or 'root'}.safetensors"
+        path = self.cache / f"{self.key}-{prefix.strip('.').replace('.', '_') or 'root'}.safetensors"
         base = 8 + len(blob)
 
         if not path.exists():
@@ -334,7 +357,7 @@ class RemoteWeights:
     def fetch_config(self) -> Path:
         """Pull the small metadata files into a directory `transformers` can
         load from, so a config and tokenizer cost kilobytes, not weights."""
-        meta = self.cache / "meta"
+        meta = self.cache / f"meta-{self.key}"
         meta.mkdir(exist_ok=True)
         body = self._get("config.json")
         if body is None:

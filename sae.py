@@ -514,8 +514,10 @@ def fetch_labels(
     costs nothing and an offline run still works.
 
     Never raises for network reasons — an unreachable source yields no labels,
-    and the caller falls back to bare indices. `fetch` is injectable for
-    tests.
+    and the caller falls back to bare indices. It does not fail *silently*
+    either: lookups that failed are counted and reported in one line on
+    stderr (with the first error), so a scene missing its labels says why.
+    `fetch` is injectable for tests.
     """
     import json
     import urllib.request
@@ -525,7 +527,9 @@ def fetch_labels(
     if not model_id or not sae_id:
         return {}
 
-    root = Path(cache_dir or Path.home() / ".cache" / "mottled" / "labels")
+    import cache as cache_mod
+
+    root = Path(cache_dir) if cache_dir else cache_mod.default_dir("labels")
     cache_file = root / f"{model_id}__{sae_id}.json"
     cached: dict = {}
     if cache_file.exists():
@@ -542,7 +546,10 @@ def fetch_labels(
     fetch = fetch or _default_fetch
     out: dict[int, FeatureLabel] = {}
     fresh = False
-    for i in sorted({int(i) for i in indices}):
+    failed: list[int] = []
+    first_error: Exception | None = None
+    wanted = sorted({int(i) for i in indices})
+    for i in wanted:
         key = str(i)
         if key not in cached:
             try:
@@ -550,7 +557,9 @@ def fetch_labels(
                 exps = (payload or {}).get("explanations") or []
                 cached[key] = _first_explanation(exps)
                 fresh = True
-            except Exception:      # offline, rate-limited, changed shape …
+            except Exception as exc:  # offline, rate-limited, changed shape …
+                failed.append(i)
+                first_error = first_error or exc
                 continue
         entry = cached.get(key)
         if entry:
@@ -558,12 +567,23 @@ def fetch_labels(
                                   explained_by=entry.get("explained_by"),
                                   method=entry.get("method"),
                                   score=entry.get("score"))
+    if failed:
+        import sys
+
+        shown = ", ".join(str(i) for i in failed[:5]) + (" …" if len(failed) > 5 else "")
+        print(f"mottled: warning: {len(failed)} of {len(wanted)} Neuronpedia label "
+              f"lookups failed for {model_id}/{sae_id} (features {shown}): "
+              f"{type(first_error).__name__}: {first_error}; those features "
+              f"are shown by index only", file=sys.stderr)
     if fresh:
         try:
             root.mkdir(parents=True, exist_ok=True)
             cache_file.write_text(json.dumps(cached))
-        except OSError:
-            pass
+        except OSError as exc:
+            import sys
+
+            print(f"mottled: warning: could not write the label cache "
+                  f"{cache_file}: {exc}", file=sys.stderr)
     return out
 
 

@@ -306,7 +306,8 @@ def test_cli_export_models(tmp_path, capsys):
     out = tmp_path / "models.mtj"
     assert main(["export", PROMPT, "-o", str(out),
                  "--models", "gpt2,distilgpt2"]) == 0
-    assert "shared vocabulary" in capsys.readouterr().out
+    # the comparison is reported on stderr: stdout is kept for data
+    assert "shared vocabulary" in capsys.readouterr().err
     scene = statefile.load_scene(out)
     assert len(scene["runs"]) == 2
 
