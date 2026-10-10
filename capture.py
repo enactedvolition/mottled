@@ -496,6 +496,42 @@ def _clean_token(tok) -> str:
     return str(tok).replace("▁", " ").replace("Ġ", " ").replace("Ċ", "\\n")
 
 
+def moe_block_indices(cfg, n_blocks: int, logits: list) -> list[int]:
+    """Which decoder block each non-None router-logits entry belongs to.
+
+    HF returns router logits either one entry per block (dense blocks as
+    None) or only for the MoE blocks. In the first case the position is the
+    block. In the second, MoE blocks can be *interleaved* with dense ones
+    (Qwen-MoE `decoder_sparse_step` / `mlp_only_layers`, DeepSeek
+    `first_k_dense_replace` + `moe_layer_freq`, Llama-4
+    `interleave_moe_layer_step`), so assuming they are the tail of the stack
+    mislabels every layer. Config says which; the tail is the last resort.
+    """
+    present = [i for i, l in enumerate(logits) if l is not None]
+    if len(logits) == n_blocks:
+        return present
+    n = len(present)
+    moe = None
+    if cfg is not None:
+        mlp_only = set(getattr(cfg, "mlp_only_layers", None) or [])
+        step = getattr(cfg, "decoder_sparse_step", None)
+        step = step or getattr(cfg, "interleave_moe_layer_step", None)
+        first_dense = getattr(cfg, "first_k_dense_replace", None)
+        freq = getattr(cfg, "moe_layer_freq", None)
+        if step:
+            moe = [i for i in range(n_blocks)
+                   if i not in mlp_only and (i + 1) % int(step) == 0]
+        elif first_dense is not None:
+            f = int(freq or 1)
+            moe = [i for i in range(n_blocks) if i >= int(first_dense) and i % f == 0]
+        elif mlp_only:
+            moe = [i for i in range(n_blocks) if i not in mlp_only]
+    if moe is not None and len(moe) == n:
+        return moe
+    first = max(0, n_blocks - n)
+    return list(range(first, first + n))
+
+
 def _routing_from(out, model, wanted: bool, spans=None):
     """Expert routing from a forward pass, or None.
 
@@ -531,6 +567,9 @@ def _routing_from(out, model, wanted: bool, spans=None):
     n_experts = int(getattr(cfg, "num_experts", 0)
                     or getattr(cfg, "n_routed_experts", 0) or 0)
 
+    n_blocks = len(list(getattr(model, "model", model).layers)) \
+        if hasattr(getattr(model, "model", model), "layers") else len(logits)
+    blocks = moe_block_indices(cfg, n_blocks, list(logits))
     layers = [l for l in logits if l is not None]
     if not layers:
         raise ValueError("router logits present but empty")
@@ -538,12 +577,6 @@ def _routing_from(out, model, wanted: bool, spans=None):
     k = k or min(2, n_experts)
 
     experts, weights, idx = [], [], []
-    n_blocks = len(list(getattr(model, "model", model).layers)) \
-        if hasattr(getattr(model, "model", model), "layers") else len(layers)
-    # MoE layers are usually the tail of the stack (dense ones come first),
-    # so align the returned rows to the *last* n blocks rather than assuming
-    # they start at 0.
-    first = max(0, n_blocks - len(layers))
     batch = len(spans) if spans else 1
     for m, lg in enumerate(layers):
         probs = torch.softmax(lg.float(), dim=-1)
@@ -553,7 +586,7 @@ def _routing_from(out, model, wanted: bool, spans=None):
             w = w.reshape(batch, -1, w.shape[-1])
         experts.append(e.cpu().numpy().astype(np.int32))
         weights.append((w / w.sum(-1, keepdim=True)).cpu().numpy().astype(np.float32))
-        idx.append(first + m)
+        idx.append(blocks[m])
 
     experts, weights = np.stack(experts), np.stack(weights)
     layer_idx = np.asarray(idx, dtype=np.int32)
