@@ -54,7 +54,7 @@ have fetched once is served from the browser's cache after that.
 ```bash
 pip install "mottled[models] @ git+https://github.com/enactedvolition/mottled"
 
-mottled                                    # the Streamlit explorer
+mottled ui                                 # the Streamlit explorer (bare `mottled` prints help)
 mottled serve --model gpt2                 # web viewer + capture API
 mottled export "The capital of France is" -o scene.mtj
 mottled export "The residual stream" --generate 8 -o decode.mtj
@@ -64,6 +64,41 @@ mottled export-manifest scene.mtj          # what produced a scene, as JSON
 mottled parity                             # Mottled's capture vs HF, TL, NNsight
 mottled smoke                              # does this install actually work?
 ```
+
+### Analyses as commands, results as JSON
+
+Everything the explorer measures is also a command that prints one JSON
+document, so it pipes into `jq`, a notebook or CI:
+
+```bash
+mottled capture "the cat sat" "the dog sat" | mottled compare | jq .hausdorff
+mottled capture "the cat sat" | mottled sae --sae res.npz | jq '.[0].top_features'
+mottled intervene "The capital of France is" --layer -2 \
+    --direction-token " Paris" --scale 8 --target " Paris" --all-positions
+mottled dose "The capital of France is" --layer -2 --direction-token " Paris" \
+    --target " Paris" --grid=-2,-1,0,1,2
+```
+
+`intervene` and `dose` score the push against norm-matched random
+controls. With `--all-positions` the effect is measured at every position
+the push touched, not only the last one.
+
+### In a notebook
+
+A `.mtj` file is numpy arrays plus a JSON manifest:
+
+```python
+import statefile; manifest, arrays = statefile.read_container("run.mtj")  # arrays["hidden"]: (L, T, D)
+```
+
+or convert it for torch, safetensors or HF tooling:
+
+```bash
+mottled arrays run.mtj --format safetensors -o run.safetensors   # or --format npz
+```
+
+`docs/gancarz-vs-interp.md` says where the Unix philosophy and interp
+practice pull in different directions, and which way mottled went.
 
 ### On the command line, the stages compose
 
