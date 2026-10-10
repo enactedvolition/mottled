@@ -718,6 +718,212 @@ def cmd_serve(args, ctx: Ctx) -> int:
     return 0
 
 
+# ------------------------------------------------- analysis commands
+# Thin wrappers over library functions: no new math lives here. Each reads
+# .mtj (file or stdin), and prints one JSON document on stdout, so results
+# go to jq, a notebook (`json.loads(subprocess.check_output(...))`) or a
+# file. `intervene` can also keep its two-run scene with -o.
+def _plain(obj):
+    import dataclasses
+
+    import numpy as np
+
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: _plain(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, dict):
+        return {str(k): _plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    return obj
+
+
+def _print_json(obj, pretty: bool = False) -> None:
+    sys.stdout.write(_dumps(_plain(obj), indent=2 if pretty else None) + "\n")
+
+
+def cmd_compare(args, ctx: Ctx) -> int:
+    import compare as compare_mod
+
+    trajs, _, _ = _load_trajectories(_read_inputs(args.inputs))
+    if len(trajs) < 2:
+        raise CLIError(f"compare needs two trajectories, got {len(trajs)}")
+    base = trajs[0]
+    out = []
+    for i, other in enumerate(trajs[1:], start=1):
+        try:
+            c = compare_mod.compare(base, other, token=args.token)
+        except ValueError as exc:
+            raise CLIError(f"trajectory {i}: {exc}")
+        d = _plain(c)
+        d["dtw"] = _plain(c.dtw)
+        out.append({"a": 0, "b": i, "prompt_a": base.meta.get("prompt"),
+                    "prompt_b": other.meta.get("prompt"), **d})
+    _print_json(out if len(out) > 1 else out[0], args.pretty)
+    return 0
+
+
+def cmd_sae(args, ctx: Ctx) -> int:
+    import sae as sae_mod
+
+    if not Path(args.sae).is_file():
+        raise CLIError(f"{args.sae}: no such file")
+    dictionary = sae_mod.load_npz(args.sae)
+    trajs, _, _ = _load_trajectories(_read_inputs(args.inputs))
+    out = []
+    for traj in trajs:
+        if traj.dim != dictionary.w_enc.shape[0]:
+            raise CLIError(f"SAE width {dictionary.w_enc.shape[0]} does not match "
+                           f"the trajectory's hidden size {traj.dim}")
+        fit = sae_mod.fit_report(dictionary, traj)
+        acts = sae_mod.feature_trajectory(traj, dictionary)
+        layer = fit.best_layer if args.layer is None else args.layer % traj.n_layers
+        tok = args.token % traj.n_tokens
+        top = sae_mod.top_features(acts, layer, tok, k=args.k)
+        labels = getattr(dictionary, "labels", None)
+        out.append({
+            "prompt": traj.meta.get("prompt"), "fit": _plain(fit),
+            "best_error": fit.best_error, "layer": layer, "token": tok,
+            "token_text": traj.tokens[tok] if traj.tokens else None,
+            "top_features": [{"feature": int(f), "activation": float(a),
+                              "label": (labels[f] if labels and f < len(labels) else None)}
+                             for f, a in top]})
+    _print_json(out, args.pretty)
+    return 0
+
+
+def _model_for(args, ctx):
+    _quiet_libraries(ctx)
+    _check_model(args.model)
+    _silence_transformers(ctx)
+    from capture import load_model
+    from config import MarbleConfig
+
+    cfg = MarbleConfig(model=args.model, device=args.device, dtype=args.dtype,
+                       seed=args.seed, use_cache=False)
+    model, tok = load_model(cfg.model, device=cfg.device, dtype=cfg.dtype)
+    return cfg, model, tok
+
+
+def _token_id(tokenizer, text: str, what: str) -> int:
+    from dose import resolve_target
+
+    try:
+        return resolve_target(tokenizer, text)
+    except ValueError as exc:
+        raise UsageError(f"{what}: {exc}")
+
+
+def _direction(args, baseline, tokenizer):
+    import numpy as np
+
+    from intervene import direction_from_token
+
+    if args.direction:
+        if not Path(args.direction).is_file():
+            raise CLIError(f"{args.direction}: no such file")
+        d = np.load(args.direction).astype(np.float32).reshape(-1)
+        if d.shape[0] != baseline.dim:
+            raise CLIError(f"{args.direction}: length {d.shape[0]}, model width {baseline.dim}")
+        return d / max(float(np.linalg.norm(d)), 1e-12)
+    if args.direction_token:
+        return direction_from_token(
+            baseline, _token_id(tokenizer, args.direction_token, "--direction-token"))
+    raise UsageError("give a direction: --direction-token TEXT or --direction FILE.npy")
+
+
+def cmd_intervene(args, ctx: Ctx) -> int:
+    prompt = _prompts([args.prompt])[0]
+    sink = Sink(args.output, args.force) if args.output else None
+    cfg, model, tok = _model_for(args, ctx)
+
+    import pipeline
+    import statefile
+    from intervene import Perturb
+
+    baseline = pipeline._capture_with(cfg, prompt, model=model, tokenizer=tok)
+    unit = _direction(args, baseline, tok)
+    layer = args.layer % baseline.n_layers
+    token = None if args.all_positions else args.token
+    target = _token_id(tok, args.target, "--target") if args.target else None
+    iv = Perturb(layer, (args.scale * unit).astype("float32"), token=token)
+    result = pipeline.run_intervention(cfg, prompt, [iv], model, tok, target_id=target)
+    report = {"prompt": prompt, "intervention": iv.record(),
+              "positions": "all" if token is None else [int(token)],
+              "divergence": _plain(result["divergence"])}
+    if "faithfulness" in result:
+        report["faithfulness"] = _plain(result["faithfulness"])
+    report["intervention"].pop("vector", None)
+    if sink:
+        pipeline.attach_manifest(result, cfg)
+        buf = io.BytesIO()
+        statefile.save_scene(result, buf)
+        sink.write(buf.getvalue())
+        sink.close()
+    _print_json(report, args.pretty)
+    return 0
+
+
+def cmd_dose(args, ctx: Ctx) -> int:
+    prompts = _prompts(args.prompts)
+    cfg, model, tok = _model_for(args, ctx)
+
+    import pipeline
+    from dose import dose_sweep
+
+    baseline = pipeline._capture_with(cfg, prompts[0], model=model, tokenizer=tok)
+    unit = _direction(args, baseline, tok)
+    grid = tuple(float(x) for x in args.grid.split(",")) if args.grid else None
+    kw = {"grid": grid} if grid else {}
+    sweep = dose_sweep(model, prompts, unit, args.layer % baseline.n_layers,
+                       args.target, tokenizer=tok,
+                       positions="all" if args.all_positions else "last",
+                       n_random=args.n_random, seed=args.seed,
+                       source="token" if args.direction_token else "other",
+                       cfg=cfg, device=cfg.device, dtype=cfg.dtype, **kw)
+    _print_json(sweep.to_dict(), args.pretty)
+    return 0
+
+
+def cmd_arrays(args, ctx: Ctx) -> int:
+    """.mtj -> .npz / .safetensors: the arrays, keyed `<i>/<name>`, plus the
+    manifest(s) as JSON (an npz member `__manifest__`, safetensors metadata)."""
+    import numpy as np
+
+    import statefile
+
+    containers = []
+    for name, raw in _read_inputs(args.inputs):
+        try:
+            containers += statefile.read_stream(io.BytesIO(raw))
+        except (ValueError, KeyError, struct_error()) as exc:
+            raise CLIError(f"{name}: malformed .mtj ({exc})")
+    single = len(containers) == 1
+    tensors, manifests = {}, []
+    for i, (manifest, arrays) in enumerate(containers):
+        manifests.append(manifest)
+        for k, v in arrays.items():
+            tensors[k if single else f"{i}/{k}"] = np.ascontiguousarray(v)
+    meta = _dumps(manifests[0] if single else manifests)
+    sink = Sink(args.output, args.force, what=f".{args.format}")
+    buf = io.BytesIO()
+    if args.format == "npz":
+        np.savez(buf, __manifest__=np.array(meta), **tensors)
+        sink.write(buf.getvalue())
+    else:
+        try:
+            from safetensors.numpy import save
+        except ImportError:
+            raise CLIError("--format safetensors needs: pip install safetensors")
+        sink.write(save(tensors, metadata={"mtj_manifest": meta}))
+    sink.close()
+    ctx.info(f"wrote {len(tensors)} arrays to {sink.name}")
+    return 0
+
+
 def _app_path() -> str:
     import ui
 
@@ -725,6 +931,8 @@ def _app_path() -> str:
 
 
 def cmd_app(args, ctx: Ctx) -> int:
+    if getattr(args, "command", None) == "app":
+        ctx.warn("`mottled app` is now `mottled ui` (app still works)")
     from streamlit.web import cli as st_cli
 
     sys.argv = ["streamlit", "run", _app_path()]
@@ -886,7 +1094,75 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default="gpt2", help="model for /api captures")
     p.set_defaults(func=cmd_serve)
 
-    p = add("app", "Streamlit explorer (what bare `mottled` runs)")
+    def model_args(p):
+        p.add_argument("--model", default="gpt2", help="HF model id or local directory")
+        p.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
+        p.add_argument("--dtype", default="float32")
+        p.add_argument("--seed", type=int, default=0, help="control/random seed (default 0)")
+
+    def steer_args(p):
+        p.add_argument("--layer", type=int, required=True, help="layer to push (negative counts back)")
+        g = p.add_mutually_exclusive_group()
+        g.add_argument("--direction-token", metavar="TEXT",
+                       help="push along this token's embedding row (one token)")
+        g.add_argument("--direction", metavar="FILE.npy", help="push along a saved vector")
+        p.add_argument("--all-positions", action="store_true",
+                       help="push every position (effects are then measured at every position)")
+        p.add_argument("--pretty", action="store_true", help="indent the JSON")
+
+    p = add("compare", "two+ trajectory .mtj -> JSON comparison (each vs the first)",
+            epilog="example:\n  mottled capture \"a b\" \"a c\" | mottled compare | jq .hausdorff")
+    p.add_argument("inputs", nargs="*", metavar="FILE", help="'-' or none = stdin")
+    p.add_argument("--token", type=int, default=-1, help="token position (default: last)")
+    p.add_argument("--pretty", action="store_true", help="indent the JSON")
+    p.set_defaults(func=cmd_compare)
+
+    p = add("sae", "trajectory .mtj + SAE .npz -> JSON fit report and top features",
+            epilog="example:\n  mottled capture \"a b\" | mottled sae --sae res.npz | jq '.[0].top_features'")
+    p.add_argument("inputs", nargs="*", metavar="FILE", help="'-' or none = stdin")
+    p.add_argument("--sae", required=True, metavar="FILE.npz", help="dictionary (sae.save_npz)")
+    p.add_argument("--layer", type=int, default=None, help="default: best-fitting layer")
+    p.add_argument("--token", type=int, default=-1)
+    p.add_argument("-k", type=int, default=5, help="features to list (default 5)")
+    p.add_argument("--pretty", action="store_true", help="indent the JSON")
+    p.set_defaults(func=cmd_sae)
+
+    p = add("intervene", "steer one prompt -> JSON divergence + effect vs a random control",
+            epilog="example:\n  mottled intervene \"the capital of france is\" --layer -2 "
+                   "--direction-token \" Paris\" --scale 8 --target \" Paris\"")
+    p.add_argument("prompt", help="the prompt ('-' = stdin)")
+    model_args(p)
+    steer_args(p)
+    p.add_argument("--scale", type=float, default=4.0, help="push size ||delta|| (default 4)")
+    p.add_argument("--token", type=int, default=-1, help="position to push (default last)")
+    p.add_argument("--target", metavar="TEXT", default=None,
+                   help="score the push toward this token against a norm-matched random push")
+    p.add_argument("-o", "--output", default=None, metavar="FILE",
+                   help="also write the baseline-vs-branch scene .mtj")
+    p.add_argument("-f", "--force", action="store_true", help="overwrite FILE")
+    p.set_defaults(func=cmd_intervene)
+
+    p = add("dose", "dose-response sweep with random controls -> JSON (dose.DoseSweep)")
+    p.add_argument("prompts", nargs="*", metavar="PROMPT", help="'-' or none = stdin lines")
+    model_args(p)
+    steer_args(p)
+    p.add_argument("--target", required=True, metavar="TEXT", help="the token whose readout is tracked")
+    p.add_argument("--grid", default=None, metavar="D1,D2,...", help="signed relative doses")
+    p.add_argument("--n-random", type=int, default=8, help="random-direction controls (default 8)")
+    p.set_defaults(func=cmd_dose)
+
+    p = add("arrays", ".mtj -> .npz or .safetensors for numpy/torch/notebooks",
+            epilog="examples:\n  mottled capture \"a b\" | mottled arrays --format safetensors -o run.safetensors\n"
+                   "  python -c \"import statefile; m, a = statefile.read_container('run.mtj'); print(a['hidden'].shape)\"")
+    p.add_argument("inputs", nargs="*", metavar="FILE", help="'-' or none = stdin")
+    p.add_argument("--format", choices=["npz", "safetensors"], default="npz")
+    out_args(p, what="the arrays")
+    p.set_defaults(func=cmd_arrays)
+
+    p = add("ui", "Streamlit explorer (interactive; bare `mottled` now prints help)")
+    p.set_defaults(func=cmd_app)
+
+    p = add("app", "old name for `mottled ui`")
     p.set_defaults(func=cmd_app)
     return parser
 
@@ -896,7 +1172,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     ctx = Ctx(verbosity=-1 if args.quiet else int(args.verbose or 0),
               debug=bool(args.debug or os.environ.get("MOTTLED_DEBUG")))
-    func = getattr(args, "func", cmd_app)
+    func = getattr(args, "func", None)
+    if func is None:
+        # Bare `mottled` is not a captive UI any more: it says what it can do.
+        # The explorer is `mottled ui`.
+        parser.print_help()
+        return 0
     try:
         return func(args, ctx)
     except UsageError as exc:

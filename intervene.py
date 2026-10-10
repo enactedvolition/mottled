@@ -351,7 +351,7 @@ def _norm_matched_random(delta: np.ndarray, seed: int = 0) -> np.ndarray:
 
 def score_against_control(model, prompt: str, baseline: StateTrajectory,
                           branch: StateTrajectory, delta: np.ndarray, layer: int,
-                          target: int, *, token: int = -1,
+                          target: int, *, token: int | None = -1,
                           scale: float | None = None, tokenizer=None, seed: int = 0,
                           device: str = "auto", dtype: str = "float32",
                           top_k: int = 5,
@@ -363,7 +363,11 @@ def score_against_control(model, prompt: str, baseline: StateTrajectory,
     how far each moves the logit lens toward `target`. Factored out so both
     `faithfulness()` and `ui.run_intervention` — which already holds
     `baseline`/`branch` and must not pay for a second branch forward pass —
-    construct the control the same way. `scale` records the steer magnitude and
+    construct the control the same way. `token=None` means the steer was
+    applied at every position: both shifts are then averaged over all
+    positions (the control is applied at every position too), and `token`
+    in the result is the last position, whose top-1 `steer_hits_target`
+    reads. `scale` records the steer magnitude and
     defaults to ``||delta||``. `capture_attention` is the one `baseline` was
     captured with, so the control runs on the same attention kernel (see
     `intervene`).
@@ -375,9 +379,15 @@ def score_against_control(model, prompt: str, baseline: StateTrajectory,
                         dtype=dtype, keep_logits=True,
                         capture_attention=capture_attention)
 
-    steer_shift = target_logit_shift(baseline, branch, target, token)
-    control_shift = target_logit_shift(baseline, control, target, token)
-    t = int(token) % baseline.n_tokens
+    # A steer applied at every position (token=None) moves every position,
+    # so its effect is the mean shift over all of them; reading only the last
+    # one credits the steer with what the earlier pushes did downstream.
+    positions = (range(baseline.n_tokens) if token is None else [token])
+    steer_shift = float(np.mean([target_logit_shift(baseline, branch, target, p)
+                                 for p in positions]))
+    control_shift = float(np.mean([target_logit_shift(baseline, control, target, p)
+                                   for p in positions]))
+    t = (baseline.n_tokens - 1) if token is None else int(token) % baseline.n_tokens
     hits = bool(int(np.asarray(branch.logits[-1, t]).argmax()) == int(target))
     target_token = None
     if baseline.vocab is not None and 0 <= int(target) < len(baseline.vocab):
