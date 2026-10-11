@@ -274,6 +274,11 @@ small models; the open items are in [`ROADMAP.md`](ROADMAP.md) (M7).
 
 ## Programmatic API
 
+For a controlled case study of wording provenance, prompt sensitivity, and
+optional residual-state replacement, see
+[Wording attribution](docs/wording-attribution.md). It keeps conversational
+source evidence separate from intervention effects and later explanations.
+
 ```python
 from capture import capture
 from projection import project

@@ -63,7 +63,7 @@ py-modules = ["attractor", "blast", "bvh", "cache", "capture", "cli", "compare",
               "dose", "intervene", "metrics", "mweights", "neighbors", "parity",
               "pipeline", "projection", "provenance", "remote", "render", "sae",
               "serve", "smoke", "statefile", "stream", "terrain", "trajectory",
-              "ui"]
+              "ui", "wording_attribution"]
 # `viewer` ships as package data, not just as repo content: serve.py resolves
 # its static root next to itself, so without this a pip-installed `mottled
 # serve` answers 404 for the very URL it prints. The samples come along
