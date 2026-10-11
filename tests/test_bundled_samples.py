@@ -11,6 +11,16 @@ density and terrain are recomputed from the stored points and must match
 the stored terrain; geometry, comparison and fidelity are pinned to values
 computed from these files on 2026-10-11. If a sample is regenerated, update
 the pinned values in the same commit and say why.
+
+Numerical pins. The values were computed with numpy 2.5.3, scipy 1.18.1 and
+scikit-learn 1.9.1; requirements.lock pins numpy 2.4.6, scipy 1.17.1 and
+scikit-learn 1.9.0, and CI resolves requirements.txt's floors to whatever is
+current. The stored terrain was written at capture time, by whatever versions
+were installed then (the oldest in July 2026), and it still recomputes to
+within 1e-16, which is the evidence that KDE here is stable across those
+versions. The tolerances (1e-3) are there for float noise, not version
+drift. If an upgrade moves a pin past them, find out what changed before widening anything: a moved density or
+geometry number is the regression these tests exist to catch.
 """
 from __future__ import annotations
 
@@ -102,6 +112,9 @@ def test_density_and_terrain_recompute_from_stored_points(name):
     t = mesh(land)
     assert t.z.shape == stored["density"].shape
     assert np.isfinite(t.z).all() and t.z.min() >= 0 and t.z.max() <= 1 + 1e-6
+    # mesh() defaults (smooth_sigma=1.5, height_scale=1.0, invert=False) are
+    # what the scenes were written with, so the heights must match too.
+    np.testing.assert_allclose(t.z, stored["z"], atol=1e-3)
 
 
 @pytest.mark.parametrize("name", sorted(PINNED))
@@ -125,6 +138,11 @@ def test_fidelity_summary_is_pinned(name):
     assert fs["low_fraction"] == pytest.approx(low, abs=1e-3)
 
 
+def test_pairs_lists_exactly_the_multi_run_scenes():
+    multi = {n for n in PINNED if len(_scene(n)["runs"]) >= 2}
+    assert set(PAIRS) == multi
+
+
 @pytest.mark.parametrize("name", sorted(PAIRS))
 def test_run_comparison_is_pinned(name):
     a, b = (p[-1] for p in _points(_scene(name))[:2])
@@ -135,9 +153,14 @@ def test_run_comparison_is_pinned(name):
     assert C.hausdorff(a, a) == 0.0 and C.dtw(a, a).distance == 0.0
 
 
-def test_pca_of_stored_plane_keeps_every_neighbourhood():
+@pytest.mark.parametrize("name", sorted(PINNED))
+def test_pca_of_stored_plane_keeps_every_neighbourhood(name):
     # A 2-D PCA of 2-D points is a rigid motion, so k-NN sets are unchanged.
-    pts = _points(_scene("self-portrait.mtj"))[0]
+    # Only where the k-th neighbour is unambiguous: music-qa-honesty item-1, -2
+    # and -6 have duplicate points and distance ties at k=5, which
+    # NearestNeighbors breaks differently after the rotation (item-1 and -6
+    # drop to 0.8), so they are left out on purpose.
+    pts = _points(_scene(name))[0]
     xy = np.transpose(pts[:, :, :2], (1, 0, 2))  # (L, T, 2)
     coords, _ = project(xy, method="pca", n_components=2)
     pres = neighborhood_preservation(xy.reshape(-1, 2), coords.reshape(-1, 2), k=5)
@@ -145,15 +168,16 @@ def test_pca_of_stored_plane_keeps_every_neighbourhood():
 
 
 # Blast scenes: Qwen2.5-0.5B-Instruct, 48 pellets x 25 layers each.
-# (layout, AUROC at layer 1, final-layer AUROC, peak AUROC, peak layer)
+# (layout, AUROC at layer 0 or None where undefined, AUROC at layer 1,
+#  final-layer AUROC, peak AUROC, peak layer)
 BLAST = {
     "truth.mtj": {
-        "monitor · false_claim": (0.637, 0.731, 0.821, 9),
-        "monitor · negation": (0.500, 0.929, 0.929, 21),
+        "monitor · false_claim": (0.537, 0.637, 0.731, 0.821, 9),
+        "monitor · negation": (0.389, 0.500, 0.929, 0.929, 21),
     },
     "refusal.mtj": {
-        "monitor · harmful": (0.771, 1.000, 1.000, 15),
-        "monitor · refused": (0.774, 0.995, 0.995, 17),
+        "monitor · harmful": (None, 0.771, 1.000, 1.000, 15),
+        "monitor · refused": (None, 0.774, 0.995, 0.995, 17),
     },
 }
 
@@ -166,10 +190,12 @@ def _layouts(name):
 @pytest.mark.parametrize("name", sorted(BLAST))
 def test_blast_monitor_readouts_are_pinned(name):
     lays = _layouts(name)
-    for label, (l1, last, peak, at) in BLAST[name].items():
+    for label, (l0, l1, last, peak, at) in BLAST[name].items():
         a = np.asarray(lays[label]["auroc"], dtype=np.float64)
         assert a.shape == (25,)
         assert len(lays[label]["labelled"]) == 48
+        if l0 is not None:  # the README quotes false_claim at layer 0 (0.54)
+            assert a[0] == pytest.approx(l0, abs=2e-3)
         assert a[1] == pytest.approx(l1, abs=2e-3)
         assert a[-1] == pytest.approx(last, abs=2e-3)
         assert np.nanmax(a) == pytest.approx(peak, abs=2e-3)
