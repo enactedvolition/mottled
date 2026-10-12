@@ -172,6 +172,7 @@ def test_pca_of_stored_plane_keeps_every_neighbourhood():
 
 # Blast scenes: Qwen2.5-0.5B-Instruct, 48 pellets x 25 layers each. Only the
 # values blast/README.md states in prose are pinned, so the docs can't drift.
+# README ranges are the measured min/max rounded outward to two decimals.
 def _monitor(name, label):
     b = load_scene(SAMPLES / "blast" / name)["blast"]
     lay = {(x.get("name") or x.get("label")): x["arrays"] for x in b["layouts"]}[label]
@@ -198,10 +199,12 @@ def test_blast_matches_what_the_readme_says():
     assert (harm[13:] >= 0.99).all()                            # "0.99 or more from layer 13"
     fc = _monitor("truth.mtj", "monitor · false_claim")
     assert fc["auroc"][0] == pytest.approx(0.54, abs=5e-3)     # "0.54 at layer 0"
-    assert (fc["auroc"][1:] >= 0.635).all() and (fc["auroc"][1:] <= 0.825).all()  # "0.64 to 0.82"
+    assert fc["auroc"][1:].min() == pytest.approx(0.637, abs=2e-3)  # "0.63 to 0.83"
+    assert fc["auroc"][1:].max() == pytest.approx(0.821, abs=2e-3)
     assert int((fc["auroc"] > fc["null95"]).sum()) == 24       # "24 of 25 layers"
     neg = _monitor("truth.mtj", "monitor · negation")["auroc"]
-    assert (neg[15:] >= 0.875).all() and (neg[15:] <= 0.935).all()  # "0.88 to 0.93 from layer 15"
+    assert neg[15:].min() == pytest.approx(0.876, abs=2e-3)  # "0.87 to 0.93 from layer 15"
+    assert neg[15:].max() == pytest.approx(0.929, abs=2e-3)
 
 
 def test_refusal_layer_zero_is_one_point():
