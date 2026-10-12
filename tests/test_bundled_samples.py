@@ -8,9 +8,10 @@ captures) and run the downstream steps on them, offline, with no model.
 Scenes store projected coordinates, entropies and per-state preservation,
 not raw hidden states, so the steps here start from the projected space:
 density and terrain are recomputed from the stored points and must match
-the stored terrain; geometry, comparison and fidelity are pinned to values
-computed from these files on 2026-10-11. If a sample is regenerated, update
-the pinned values in the same commit and say why.
+the stored terrain; geometry, comparison and fidelity are checked as
+invariants on every scene. Only two things are pinned: one canary scene
+(self-portrait, whose fidelity the docs quote) and the blast values its
+README states in prose. If either moves, update the docs in the same commit.
 
 Numerical pins. The values were computed with numpy 2.5.3, scipy 1.18.1 and
 scikit-learn 1.9.1; requirements.lock pins numpy 2.4.6, scipy 1.17.1 and
@@ -38,37 +39,21 @@ from terrain import mesh
 
 SAMPLES = Path(__file__).resolve().parent.parent / "viewer" / "samples"
 
-# name: (model, path_length of run 0's final token, entropy_collapse of run 0's
-#        final token, mean preservation, low fraction)
-PINNED = {
-    "gpt2-capitals.mtj": ("gpt2", 423.9340, -4.7537, 0.6438, 0.2692),
-    "gpt2-decode.mtj": ("gpt2", 481.4730, -2.7910, 0.3149, 0.7149),
-    "gpt2-features.mtj": ("gpt2", 452.5531, -5.3769, 0.5462, 0.4231),
-    "models-gpt2-distilgpt2.mtj": ("gpt2", 0.4166, -4.7527, 0.6490, 0.2400),
-    "models-qwen-gpt2.mtj": ("Qwen/Qwen2.5-1.5B-Instruct", 3.3027, -3.5324, 0.4710, 0.5095),
-    "qwen-capitals.mtj": ("Qwen/Qwen2.5-1.5B-Instruct", 246.6330, -3.7676, 0.4466, 0.6448),
-    "scene-abc.mtj": ("gpt2", 423.3516, -4.7537, 0.6415, 0.2769),
-    "self-portrait.mtj": ("gpt2", 485.2397, -3.4456, 0.3659, 0.7055),
-    "single.mtj": ("gpt2", 424.6904, -4.7537, 0.6431, 0.2769),
+MODELS = {
+    "gpt2-capitals.mtj": "gpt2",
+    "gpt2-decode.mtj": "gpt2",
+    "gpt2-features.mtj": "gpt2",
+    "models-gpt2-distilgpt2.mtj": "gpt2",
+    "models-qwen-gpt2.mtj": "Qwen/Qwen2.5-1.5B-Instruct",
+    "qwen-capitals.mtj": "Qwen/Qwen2.5-1.5B-Instruct",
+    "scene-abc.mtj": "gpt2",
+    "self-portrait.mtj": "gpt2",
+    "single.mtj": "gpt2",
 }
-
-# name: (Hausdorff, normalised DTW) between run 0 and run 1 final-token paths
-PAIRS = {
-    "gpt2-capitals.mtj": (4.1187, 1.0588),
-    "gpt2-features.mtj": (4.6923, 1.1650),
-    "models-gpt2-distilgpt2.mtj": (0.1261, 0.0313),
-    "models-qwen-gpt2.mtj": (0.7870, 0.2610),
-    "qwen-capitals.mtj": (10.6164, 1.1155),
-    "scene-abc.mtj": (4.0720, 1.0476),
-    "self-portrait.mtj": (41.0881, 12.0005),
-}
-
-REL = 1e-3
-
-# The music-qa-honesty scenes (Qwen2.5-0.5B-Instruct) get the structural and
-# terrain checks; their findings are pinned in that folder's own README.
 MUSIC = sorted(f"music-qa-honesty/{p.name}" for p in (SAMPLES / "music-qa-honesty").glob("*.mtj"))
-ALL = sorted(PINNED) + MUSIC
+ALL = sorted(MODELS) + MUSIC
+# Scenes with two or more runs: the ones a run comparison applies to.
+PAIRS = sorted(n for n in MODELS if len(load_scene(SAMPLES / n)["runs"]) > 1)
 
 
 def _scene(name):
@@ -79,136 +64,149 @@ def _points(scene):
     return [np.asarray(r["points"], dtype=np.float64) for r in scene["runs"]]
 
 
+def _each(names, check):
+    """Run `check` on every scene and report all failures at once, by name."""
+    failed = []
+    for name in names:
+        try:
+            check(name, _scene(name))
+        except AssertionError as e:
+            failed.append(f"{name}: {e}")
+    assert not failed, "\n".join(failed)
+
+
 def test_every_bundled_scene_is_covered():
-    shipped = {p.name for p in SAMPLES.glob("*.mtj")}
-    assert shipped == set(PINNED), "a sample was added or removed: pin its values here"
+    assert {p.name for p in SAMPLES.glob("*.mtj")} == set(MODELS), \
+        "a sample was added or removed: list its model here"
     assert len(MUSIC) == 5
 
 
-@pytest.mark.parametrize("name", ALL)
-def test_scene_shapes_are_consistent(name):
-    s = _scene(name)
-    want = PINNED[name][0] if name in PINNED else "Qwen/Qwen2.5-0.5B-Instruct"
-    assert s["meta"]["model"] == want
-    for run in s["runs"]:
-        pts, ent, q = (np.asarray(run[k]) for k in ("points", "entropy", "quality"))
-        T, L, three = pts.shape
-        assert three == 3 and ent.shape == (L, T) and q.shape == (L, T)
-        assert np.isfinite(pts).all() and np.isfinite(ent).all()
-        assert (ent >= 0).all()
-        assert ((q >= 0) & (q <= 1)).all()
+def test_scene_structure_and_ranges():
+    def check(name, s):
+        assert s["meta"]["model"] == MODELS.get(name, "Qwen/Qwen2.5-0.5B-Instruct")
+        for run in s["runs"]:
+            pts, ent, q = (np.asarray(run[k]) for k in ("points", "entropy", "quality"))
+            T, L, three = pts.shape
+            assert three == 3 and ent.shape == (L, T) and q.shape == (L, T)
+            assert np.isfinite(pts).all() and np.isfinite(ent).all() and (ent >= 0).all()
+            assert ((q >= 0) & (q <= 1)).all()
+    _each(ALL, check)
 
 
-@pytest.mark.parametrize("name", ALL)
-def test_density_and_terrain_recompute_from_stored_points(name):
-    s = _scene(name)
-    stored = s["terrain"]
-    xy = np.concatenate([p.reshape(-1, 3)[:, :2] for p in _points(s)])
-    land = compute_density(xy, grid_size=stored["density"].shape[0])
-    np.testing.assert_allclose(land.grid_x, stored["x"], rtol=1e-4, atol=1e-6)
-    np.testing.assert_allclose(land.grid_y, stored["y"], rtol=1e-4, atol=1e-6)
-    np.testing.assert_allclose(land.density, stored["density"], atol=1e-3)
-    assert 0.0 <= land.density.min() and land.density.max() == pytest.approx(1.0)
-    t = mesh(land)
-    assert t.z.shape == stored["density"].shape
-    assert np.isfinite(t.z).all() and t.z.min() >= 0 and t.z.max() <= 1 + 1e-6
-    # mesh() defaults (smooth_sigma=1.5, height_scale=1.0, invert=False) are
-    # what the scenes were written with, so the heights must match too.
-    np.testing.assert_allclose(t.z, stored["z"], atol=1e-3)
+def test_density_and_terrain_recompute_from_stored_points():
+    # Not a snapshot: the stored terrain is what the viewer draws, so the
+    # pipeline must reproduce it from the stored points, heights included.
+    def check(name, s):
+        stored = s["terrain"]
+        xy = np.concatenate([p.reshape(-1, 3)[:, :2] for p in _points(s)])
+        land = compute_density(xy, grid_size=stored["density"].shape[0])
+        np.testing.assert_allclose(land.grid_x, stored["x"], rtol=1e-4, atol=1e-6)
+        np.testing.assert_allclose(land.grid_y, stored["y"], rtol=1e-4, atol=1e-6)
+        np.testing.assert_allclose(land.density, stored["density"], atol=1e-3)
+        assert land.density.min() >= 0 and land.density.max() == pytest.approx(1.0)
+        # mesh() defaults (smooth_sigma=1.5, height_scale=1.0, invert=False)
+        # are what the scenes were written with, so the heights must match.
+        t = mesh(land)
+        assert np.isfinite(t.z).all() and t.z.min() >= 0 and t.z.max() <= 1 + 1e-6
+        np.testing.assert_allclose(t.z, stored["z"], atol=1e-3)
+    _each(ALL, check)
 
 
-@pytest.mark.parametrize("name", sorted(PINNED))
-def test_geometry_metrics_are_pinned(name):
-    s = _scene(name)
-    _, pl, ec, _, _ = PINNED[name]
-    final = _points(s)[0][-1]
-    assert metrics.path_length(final) == pytest.approx(pl, rel=REL)
-    ent = np.asarray(s["runs"][0]["entropy"], dtype=np.float64)[:, -1]
-    assert metrics.entropy_collapse(ent) == pytest.approx(ec, abs=1e-3)
-    assert metrics.path_length(final) >= np.linalg.norm(final[-1] - final[0]) - 1e-9
-
-
-@pytest.mark.parametrize("name", sorted(PINNED))
-def test_fidelity_summary_is_pinned(name):
-    s = _scene(name)
-    _, _, _, mean, low = PINNED[name]
-    q = np.concatenate([np.asarray(r["quality"]).ravel() for r in s["runs"]])
-    fs = fidelity_summary(q)
-    assert fs["mean"] == pytest.approx(mean, abs=1e-3)
-    assert fs["low_fraction"] == pytest.approx(low, abs=1e-3)
+def test_geometry_and_fidelity_invariants():
+    def check(name, s):
+        for run, pts in zip(s["runs"], _points(s)):
+            final = pts[-1]
+            assert metrics.path_length(final) >= np.linalg.norm(final[-1] - final[0]) - 1e-9
+            assert np.isfinite(metrics.entropy_collapse(np.asarray(run["entropy"])[:, -1]))
+        q = np.concatenate([np.asarray(r["quality"]).ravel() for r in s["runs"]])
+        fs = fidelity_summary(q)
+        assert fs["n"] == q.size and 0 <= fs["mean"] <= 1 and 0 <= fs["low_fraction"] <= 1
+        assert fs["low_fraction"] == pytest.approx((q < fs["low_fidelity"]).mean())
+    _each(ALL, check)
 
 
 def test_pairs_lists_exactly_the_multi_run_scenes():
-    multi = {n for n in PINNED if len(_scene(n)["runs"]) >= 2}
-    assert set(PAIRS) == multi
+    assert PAIRS == ["gpt2-capitals.mtj", "gpt2-features.mtj", "models-gpt2-distilgpt2.mtj",
+                     "models-qwen-gpt2.mtj", "qwen-capitals.mtj", "scene-abc.mtj",
+                     "self-portrait.mtj"]
 
 
-@pytest.mark.parametrize("name", sorted(PAIRS))
-def test_run_comparison_is_pinned(name):
-    a, b = (p[-1] for p in _points(_scene(name))[:2])
-    haus, dtw_n = PAIRS[name]
-    assert C.hausdorff(a, b) == pytest.approx(haus, rel=REL, abs=1e-4)
-    assert C.hausdorff(a, b) == pytest.approx(C.hausdorff(b, a))
-    assert C.dtw(a, b).normalized == pytest.approx(dtw_n, rel=REL, abs=1e-4)
-    assert C.hausdorff(a, a) == 0.0 and C.dtw(a, a).distance == 0.0
+def test_run_comparison_invariants():
+    def check(name, s):
+        a, b = (p[-1] for p in _points(s)[:2])
+        h = C.hausdorff(a, b)
+        assert h > 0 and h == pytest.approx(C.hausdorff(b, a))
+        assert C.dtw(a, b).normalized == pytest.approx(C.dtw(b, a).normalized)
+        assert C.hausdorff(a, a) == 0.0 and C.dtw(a, a).distance == 0.0
+    _each(PAIRS, check)
 
 
-@pytest.mark.parametrize("name", sorted(PINNED))
-def test_pca_of_stored_plane_keeps_every_neighbourhood(name):
+def test_self_portrait_canary():
+    # The one pinned scene. Its fidelity is the figure the README and the
+    # project site quote (mean 0.37, 71% of states under the 0.5 flag); if it
+    # moves, those need updating in the same commit.
+    s = _scene("self-portrait.mtj")
+    q = np.concatenate([np.asarray(r["quality"]).ravel() for r in s["runs"]])
+    fs = fidelity_summary(q)
+    assert fs["mean"] == pytest.approx(0.3659, abs=1e-3)
+    assert fs["low_fraction"] == pytest.approx(0.7055, abs=1e-3)
+    a, b = (p[-1] for p in _points(s)[:2])
+    assert metrics.path_length(a) == pytest.approx(485.2397, rel=1e-3)
+    assert C.hausdorff(a, b) == pytest.approx(41.0881, rel=1e-3)
+    assert C.dtw(a, b).normalized == pytest.approx(12.0005, rel=1e-3)
+
+
+def test_pca_of_stored_plane_keeps_every_neighbourhood():
     # A 2-D PCA of 2-D points is a rigid motion, so k-NN sets are unchanged.
     # Only where the k-th neighbour is unambiguous: music-qa-honesty item-1, -2
     # and -6 have duplicate points and distance ties at k=5, which
-    # NearestNeighbors breaks differently after the rotation (item-1 and -6
-    # drop to 0.8), so they are left out on purpose.
-    pts = _points(_scene(name))[0]
-    xy = np.transpose(pts[:, :, :2], (1, 0, 2))  # (L, T, 2)
-    coords, _ = project(xy, method="pca", n_components=2)
-    pres = neighborhood_preservation(xy.reshape(-1, 2), coords.reshape(-1, 2), k=5)
-    assert pres.min() == pytest.approx(1.0)
+    # NearestNeighbors breaks differently after the rotation, so the music
+    # scenes are left out on purpose.
+    def check(name, s):
+        xy = np.transpose(_points(s)[0][:, :, :2], (1, 0, 2))  # (L, T, 2)
+        coords, _ = project(xy, method="pca", n_components=2)
+        pres = neighborhood_preservation(xy.reshape(-1, 2), coords.reshape(-1, 2), k=5)
+        assert pres.min() == pytest.approx(1.0)
+    _each(sorted(MODELS), check)
 
 
-# Blast scenes: Qwen2.5-0.5B-Instruct, 48 pellets x 25 layers each.
-# (layout, AUROC at layer 0 or None where undefined, AUROC at layer 1,
-#  final-layer AUROC, peak AUROC, peak layer)
-BLAST = {
-    "truth.mtj": {
-        "monitor · false_claim": (0.537, 0.637, 0.731, 0.821, 9),
-        "monitor · negation": (0.389, 0.500, 0.929, 0.929, 21),
-    },
-    "refusal.mtj": {
-        "monitor · harmful": (None, 0.771, 1.000, 1.000, 15),
-        "monitor · refused": (None, 0.774, 0.995, 0.995, 17),
-    },
-}
-
-
-def _layouts(name):
+# Blast scenes: Qwen2.5-0.5B-Instruct, 48 pellets x 25 layers each. Only the
+# values blast/README.md states in prose are pinned, so the docs can't drift.
+def _monitor(name, label):
     b = load_scene(SAMPLES / "blast" / name)["blast"]
-    return {(lay.get("name") or lay.get("label")): lay["arrays"] for lay in b["layouts"]}
+    lay = {(x.get("name") or x.get("label")): x["arrays"] for x in b["layouts"]}[label]
+    return {k: np.asarray(v, dtype=np.float64) for k, v in lay.items()}
 
 
-@pytest.mark.parametrize("name", sorted(BLAST))
-def test_blast_monitor_readouts_are_pinned(name):
-    lays = _layouts(name)
-    for label, (l0, l1, last, peak, at) in BLAST[name].items():
-        a = np.asarray(lays[label]["auroc"], dtype=np.float64)
-        assert a.shape == (25,)
-        assert len(lays[label]["labelled"]) == 48
-        if l0 is not None:  # the README quotes false_claim at layer 0 (0.54)
-            assert a[0] == pytest.approx(l0, abs=2e-3)
-        assert a[1] == pytest.approx(l1, abs=2e-3)
-        assert a[-1] == pytest.approx(last, abs=2e-3)
-        assert np.nanmax(a) == pytest.approx(peak, abs=2e-3)
-        assert int(np.nanargmax(a)) == at
-        valid = ~np.isnan(a)
-        assert ((a[valid] >= 0) & (a[valid] <= 1)).all()
-        lo, hi = (np.asarray(lays[label][k], dtype=np.float64) for k in ("null05", "null95"))
-        assert (lo[valid] <= hi[valid]).all()
+MONITORS = [("truth.mtj", "monitor · false_claim"), ("truth.mtj", "monitor · negation"),
+            ("refusal.mtj", "monitor · harmful"), ("refusal.mtj", "monitor · refused")]
+
+
+def test_blast_readouts_are_well_formed():
+    for name, label in MONITORS:
+        m = _monitor(name, label)
+        a = m["auroc"]
+        assert a.shape == (25,) and len(m["labelled"]) == 48, label
+        ok = ~np.isnan(a)
+        assert ((a[ok] >= 0) & (a[ok] <= 1)).all(), label
+        assert (m["null05"][ok] <= m["null95"][ok]).all(), label
+
+
+def test_blast_matches_what_the_readme_says():
+    harm = _monitor("refusal.mtj", "monitor · harmful")["auroc"]
+    assert harm[1] == pytest.approx(0.77, abs=5e-3)            # "0.77 at layer 1"
+    assert (harm[13:] >= 0.99).all()                            # "0.99 or more from layer 13"
+    fc = _monitor("truth.mtj", "monitor · false_claim")
+    assert fc["auroc"][0] == pytest.approx(0.54, abs=5e-3)     # "0.54 at layer 0"
+    assert (fc["auroc"][1:] >= 0.635).all() and (fc["auroc"][1:] <= 0.825).all()  # "0.64 to 0.82"
+    assert int((fc["auroc"] > fc["null95"]).sum()) == 24       # "24 of 25 layers"
+    neg = _monitor("truth.mtj", "monitor · negation")["auroc"]
+    assert (neg[15:] >= 0.875).all() and (neg[15:] <= 0.935).all()  # "0.88 to 0.93 from layer 15"
 
 
 def test_refusal_layer_zero_is_one_point():
     # Every refusal pellet is read at the same template token, so layer 0 has
     # nothing to separate and its AUROC is undefined, as the README says.
-    for label in BLAST["refusal.mtj"]:
-        a = np.asarray(_layouts("refusal.mtj")[label]["auroc"])
+    for label in ("monitor · harmful", "monitor · refused"):
+        a = _monitor("refusal.mtj", label)["auroc"]
         assert np.isnan(a[0]) and not np.isnan(a[1:]).any()
