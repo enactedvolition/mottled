@@ -65,6 +65,32 @@ mottled parity                             # Mottled's capture vs HF, TL, NNsigh
 mottled smoke                              # does this install actually work?
 ```
 
+### On the command line, the stages compose
+
+`export` is a convenience. Underneath it are stages that read stdin and
+write stdout, so they pipe like any Unix tool. Stdout carries only data;
+status goes to stderr, and only when you ask with `-v`:
+
+```bash
+mottled capture "The capital of France is" "The capital of Germany is" \
+  | mottled project > scene.mtj                 # = mottled export ... -o scene.mtj
+cat prompts.txt | mottled capture --model gpt2 > runs.mtj   # one prompt per line
+mottled project runs.mtj --projection umap --set grid_size=96 -o umap.mtj
+mottled inspect scene.mtj                       # one-screen summary
+mottled inspect scene.mtj --ndjson | jq -c 'select(.layer == 12) | {text, entropy}'
+mottled validate *.mtj                          # silent when valid, exit 1 when not
+```
+
+`capture` writes one trajectory container per prompt (a `.mtj` stream;
+`cat a.mtj b.mtj` is a stream too) and `project` turns any stream into one
+scene. `capture | project` produces exactly the scene `export` does. Exit
+status is 0 on success, 1 when the work failed or an input is invalid, 2
+for a usage error. Errors are one line on stderr (`--debug` or
+`MOTTLED_DEBUG=1` for the traceback). Nothing is overwritten without
+`-f`, and binary is never written to a terminal. `NO_COLOR` is honoured.
+The disk cache lives in the per-user cache directory (`$MOTTLED_CACHE_DIR`
+overrides it), never in the working directory.
+
 Every capture is a real model; `gpt2` is the default because it is the
 smallest honest one. The extras are `models` (torch and transformers, for
 capture), `remote` (stream weights you do not hold), `umap`, `faiss`,
@@ -359,14 +385,16 @@ and rendered by Mottled. Given the second one, GPT-2's top continuation is
 | `statefile.py` · `provenance.py` | the `.mtj` format and the analysis record it carries |
 | `models/` | producers: model families, TransformerLens, external states, API logprobs |
 | `viewer/` | the WebGL viewer and the in-browser capture stack, each JS file pinned to a Python reference by a conformance test |
-| `design_tokens.py` | every colour and font; the explorer's and viewer's styles mirror it, and a test fails on drift |
+| `mtjschema.py` · `cli.py` | the `.mtj` JSON Schemas and validator; the command-line stages |
+| `design_tokens.py` · `codegen.py` | every colour and font; `python -m codegen` generates the viewer's `tokens.js` and `:root` CSS, the Streamlit theme and `docs/schema/` from Python, and a test fails on drift |
 
 ## Docs
 
 - [`docs/validity.md`](docs/validity.md): the inferential contract, what each
   artifact licenses you to claim and the controls a research-grade claim
   needs on top
-- [`docs/mtj-format.md`](docs/mtj-format.md): the `.mtj` interchange spec
+- [`docs/mtj-format.md`](docs/mtj-format.md): the `.mtj` interchange spec,
+  with its generated JSON Schemas in [`docs/schema/`](docs/schema/)
 - [`docs/field-notes.md`](docs/field-notes.md): a dated orientation to the
   interpretability landscape, and the traps this project has already paid for
 - [`ROADMAP.md`](ROADMAP.md) · [`CHANGELOG.md`](CHANGELOG.md) ·

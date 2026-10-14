@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### A command line that composes
+- **Stage commands that pipe.** `mottled capture` (prompts in, one trajectory
+  `.mtj` container per prompt out), `mottled project` (a trajectory stream
+  in, a scene out), `mottled inspect` (a summary, `--json`, or `--ndjson`
+  with one record per run/layer/token) and `mottled validate`. Each reads
+  stdin when given no file or `-` and writes stdout when piped or given
+  `-o -`. `capture | project` is byte-for-byte the scene `export` writes
+  (bar the record's timestamp); `export` is now literally the two stages.
+  Containers are self-delimiting, so `cat a.mtj b.mtj` is a valid stream.
+- **CLI conventions.** Stdout carries data only; status goes to stderr and
+  only with `-v` (`-vv` adds library progress bars, `-q` hides warnings).
+  `--version`. One-line errors, exit 1 for runtime errors and invalid input,
+  2 for usage, tracebacks only with `--debug` or `MOTTLED_DEBUG=1`. Empty
+  prompts, missing files, a non-model directory and an unknown hub id fail
+  before any work. No overwriting without `-f`; no binary to a terminal.
+  `NO_COLOR` honoured. `--help` lists one command per line, with examples.
+  `project --config FILE.json --set KEY=VALUE` exposes every `MarbleConfig`
+  field without Python.
+- **Behaviour change:** `export` and `export-blast` no longer overwrite an
+  existing output (pass `-f`), and their "wrote …" lines moved from stdout
+  to stderr behind `-v`. `export --models`' comparison summary is on stderr.
+- **Schemas.** Manifests carry `"schema": "mottled-scene/1"` or
+  `"mottled-trajectory/1"` (additive). JSON Schemas for both are generated
+  from `mtjschema.py` into `docs/schema/`; `mottled validate` checks a file
+  against them plus the byte layout, references and shapes.
+- **Strict JSON.** Writers no longer emit `NaN`/`Infinity` (which made the
+  viewer's `JSON.parse` reject logprobs scenes); non-finite manifest numbers
+  are written as `null`, the documented convention.
+- **Repair.** The pipeline cache key covers every `MarbleConfig` field by
+  construction (dtype, device, keep_logits, grid_padding, marble_lift … were
+  missing), plus the Mottled version and the model revision. The cache moved
+  from `./.marble_cache` to the per-user cache directory
+  (`$MOTTLED_CACHE_DIR`, `$XDG_CACHE_HOME/mottled`, or the platform default).
+  `remote.py` keys cached headers, layer files and metadata by source (repo
+  + revision, and the commit when the host reports it), so one cache no
+  longer serves one model's offsets to another. Failed Neuronpedia label
+  lookups are reported on stderr instead of dropped. `import pipeline` no
+  longer imports torch.
+- **Generation.** `python -m codegen` writes `docs/schema/`, the viewer's
+  palette (`viewer/tokens.js`), its `:root` CSS block and the Streamlit
+  theme from Python sources; CI fails on drift.
+- **Viewer.** Scene values (the comparison table's shared tokens, prompt
+  and seed counts, SAE feature ids, legend counts) were interpolated into
+  markup unescaped, a stored XSS via `?file=`; all are escaped, every scene value in markup is
+  checked by a test, and `index.html` carries a Content-Security-Policy
+  (`script-src 'self'`).
+
 ### The shotgun blast: one pellet per prompt
 - **`blast.py`** draws many prompts as one family: each prompt is one pellet,
   read at one position (by default the state before the model writes), and
