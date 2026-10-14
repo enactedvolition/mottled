@@ -591,9 +591,10 @@ def run_intervention(cfg: MarbleConfig, prompt: str, interventions: list,
             and interventions[0].vector is not None):
         iv = interventions[0]
         tok = iv.token if iv.token is not None else -1
+        # steered everywhere -> measured everywhere (token=None), not at -1
         result["faithfulness"] = score_against_control(
             model, prompt, baseline, branch, iv.vector, iv.layer, int(target_id),
-            token=tok, tokenizer=tokenizer, seed=cfg.seed, device=cfg.device,
+            token=iv.token, tokenizer=tokenizer, seed=cfg.seed, device=cfg.device,
             dtype=cfg.dtype, top_k=cfg.top_k,
             capture_attention=cfg.capture_attention)
         if (baseline.components is not None
