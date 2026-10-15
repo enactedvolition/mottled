@@ -22,6 +22,18 @@ density terrain, swept from layer 0 to 12. The runs start apart and end in
 the same high-density region. The amber overlay is the density's standard
 error: it marks where the terrain rests on too few points to trust.*
 
+## Your first scene in two commands
+
+```bash
+pip install "mottled[models] @ git+https://github.com/enactedvolition/mottled"
+mottled export "The capital of France is" -o scene.mtj
+```
+
+Then open `scene.mtj` in the [hosted viewer](https://enactedvolition.github.io/mottled/viewer/):
+click **Open .mtj…** or drag the file onto the page. The file is read in your
+browser and is not uploaded anywhere. The first export downloads GPT-2 (about
+500 MB) and takes a minute or two on a CPU.
+
 ## Try it without installing anything
 
 **[enactedvolition.github.io/mottled](https://enactedvolition.github.io/mottled/)**
@@ -50,6 +62,13 @@ have fetched once is served from the browser's cache after that.
 | Qwen2.5 0.5B | 675 MB | qwen2: attention bias |
 
 ## Install
+
+The `models` extra pulls in torch, which is about 2 GB with CUDA wheels. On a
+machine without a GPU, install the CPU-only build first to keep it smaller:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
 
 ```bash
 pip install "mottled[models] @ git+https://github.com/enactedvolition/mottled"
