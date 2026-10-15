@@ -29,14 +29,25 @@ Running the tool:
 ```bash
 mottled                              # Streamlit explorer (ui.py)
 mottled serve --model gpt2           # stdlib server: viewer + capture API
-mottled export "a prompt" -o s.mtj   # capture -> scene file
+mottled capture "a" "b" | mottled project > s.mtj   # the stages, piped
+mottled inspect s.mtj --ndjson       # per-state records; --json summary
+mottled validate s.mtj               # schema + byte-layout check (exit 1 if bad)
+mottled export "a prompt" -o s.mtj   # capture | project in one step
 mottled export-blast items.jsonl     # one pellet per prompt -> blast scene
 mottled export-manifest s.mtj        # the analysis record the scene carries
 mottled parity                       # capture vs HF/TransformerLens/NNsight
 mottled smoke                        # does this install work? (see RELEASING.md)
 mottled export-weights gpt2          # write .mwt for in-browser inference
 python -m http.server                # viewer alone at /viewer/ (static, no API)
+python -m codegen                    # regenerate docs/schema/, viewer/tokens.js,
+                                     # the style.css :root block, .streamlit/config.toml
 ```
+
+Generated files are never edited by hand: change `mtjschema.py` or
+`design_tokens.py` and rerun `python -m codegen` (`tests/test_codegen.py`
+fails on drift). CLI rules (`cli.py`): stdout is data only, status goes to
+stderr behind `-v`, errors are one line (`--debug` for a traceback), exit 1
+runtime / 2 usage, never clobber without `-f`, never binary to a TTY.
 
 ## Architecture
 

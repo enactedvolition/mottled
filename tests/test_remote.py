@@ -304,9 +304,13 @@ def test_a_short_range_is_refused_not_cached(tmp_path, serve, short):
     _, path = _dense(tmp_path, layers=2)
     cache = tmp_path / "cache"
     honest, _ = serve(path)
-    RemoteWeights(honest, cache_dir=cache)           # caches the header
+    weights = RemoteWeights(honest, cache_dir=cache)  # header read honestly
     lying, _ = serve(path, short=short)
-    weights = RemoteWeights(lying, cache_dir=cache)
+    # the same checkpoint, now answering from a host that lies about ranges.
+    # (A second RemoteWeights pointed at `lying` would not reuse the honest
+    # header any more: cache files are keyed by source, so a header from one
+    # URL is never trusted for another.)
+    weights.base = lying
     with pytest.raises(RuntimeError, match="byte range"):
         weights.prefixed("model.layers.0.")
     assert not list(cache.glob("*.safetensors"))
@@ -350,3 +354,38 @@ def test_scatter_routes_bytes_whatever_the_chunking(chunk):
     for i in range(0, len(src), chunk):
         sink.write(src[i:i + chunk])
     assert fh.getvalue() == src[12:20] + src[30:40] + src[0:8]
+
+
+def test_one_cache_directory_serves_many_sources(tmp_path, serve):
+    """Cache files are keyed by source (base URL = repo + revision, plus the
+    commit when the host names it), not by file name: two checkpoints that
+    both call their weights `model.safetensors` must never read each other's
+    header or layer files out of a shared cache."""
+    (tmp_path / "a").mkdir(), (tmp_path / "b").mkdir()
+    _, path_a = _dense(tmp_path / "a", layers=2)
+    model_b, path_b = _dense(tmp_path / "b", layers=3)
+    base_a, _ = serve(path_a)
+    base_b, _ = serve(path_b)
+    cache = tmp_path / "shared"
+
+    a = RemoteWeights(base_a, cache_dir=cache)
+    a.cache_bytes = 1 << 30                      # keep A's layer file around
+    a.prefixed("model.layers.0.")
+    b = RemoteWeights(base_b, cache_dir=cache)
+    assert a.key != b.key
+    assert any(k.startswith("model.layers.2.") for k in b.map)   # B's own header
+    got = b.prefixed("model.layers.1.")
+    want = model_b.model.layers[1].state_dict()
+    for name, tensor in got.items():
+        assert torch.equal(tensor, want[name]), name
+    # the same source again reuses what it cached
+    assert RemoteWeights(base_a, cache_dir=cache).key == a.key
+
+
+def test_the_cache_key_follows_the_commit(tmp_path, serve):
+    _, path = _dense(tmp_path, layers=2)
+    base, _ = serve(path)
+    one = RemoteWeights(base, cache_dir=tmp_path / "c")
+    two = RemoteWeights(base, cache_dir=tmp_path / "c")
+    two.commit, two._key = "deadbeef" * 5, None   # the hub moved `main`
+    assert one.key != two.key
