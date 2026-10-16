@@ -82,7 +82,8 @@ def test_record_names_every_model_in_the_scene(traj):
 def test_record_falls_back_to_the_config_without_a_capture():
     rec = P.record(MarbleConfig(model="gpt2"))
     assert rec["models"] == [{"id": "gpt2", "revision": None, "backend": None,
-                              "family": None, "device": None, "dtype": None}]
+                              "family": None, "device": None, "dtype": None,
+                              "lens": None}]
     assert rec["prompts"] == []
 
 

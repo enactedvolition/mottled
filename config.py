@@ -43,6 +43,10 @@ class MarbleConfig:
     device: str = "auto"          # "auto" | "cpu" | "cuda" | "mps"
     dtype: str = "float32"
     keep_logits: bool = True      # keep full logit-lens logits (float16)
+    # which readout the logits are: "logit" (the raw lens, biased at early
+    # layers), "tuned" (the published tuned lens for `model`), or a tuned-lens
+    # directory. See tuned_lens.py.
+    lens: str = "logit"
     capture_components: bool = True  # record attn/MLP residual writes; set
     # False for layouts without a single attn/mlp module per block (e.g. OPT)
     capture_attention: bool = True   # record head-averaged attention patterns

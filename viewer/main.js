@@ -830,7 +830,8 @@ function setPickInfo(pick, pinned) {
     const rows = run.topk[pick.layer][tok].slice(0, 5).map(([t, p]) =>
       `<div><span class="bar" style="width:${Math.max(2, p * 120)}px"></span>` +
       `<span class="mono">'${esc(t)}'</span> <span class="dim">${(p * 100).toFixed(1)}%</span></div>`).join("");
-    html += `<div class="topk"><span class="dim">top-k readout</span>${rows}</div>`;
+    const lens = window.Reading ? window.Reading.readoutLabel(state.scene) : "logit lens";
+    html += `<div class="topk"><span class="dim">top-k readout · ${esc(lens)}</span>${rows}</div>`;
   }
   if (run.inspector) {
     // Nearest vocabulary tokens to this hidden state (cosine in embedding
@@ -1020,6 +1021,7 @@ function renderReading(scene, keepOpen) {
     if (p.projection) bits.push(`${esc(p.projection)} projection`);
     if (p.density) bits.push(`${esc(p.density)} density`);
     if (p.seed !== null) bits.push(`seed ${esc(p.seed)}`);
+    bits.push(p.lens === "logit" ? "logit lens" : "tuned lens");
     if (p.sae && p.sae.source) bits.push(`SAE ${esc(p.sae.source)}`);
     rows.push(
       `<p class="reading-prov"><b>What produced this.</b> ${models} · ` +

@@ -154,6 +154,7 @@ def intervene(
     keep_logits: bool = True,
     capture_attention: bool = False,
     capture_components: bool = False,
+    lens=None,
 ) -> StateTrajectory:
     """Run a counterfactual forward pass under `interventions`.
 
@@ -163,7 +164,8 @@ def intervene(
     baseline's `capture_attention`: it moves the pass onto the eager attention
     kernel, and a branch on another kernel differs from its baseline by
     rounding before any edit takes effect.  `capture_components` records each
-    block's attention and MLP writes, as `capture` does.
+    block's attention and MLP writes, as `capture` does. Pass the baseline's
+    `lens` too, or the two readouts are different instruments.
     """
     if not interventions:
         raise ValueError("no interventions given; use capture() for a baseline pass")
@@ -174,6 +176,7 @@ def intervene(
         keep_logits=keep_logits, state_edits=state_edits, frozen_blocks=frozen,
         capture_attention=capture_attention,
         capture_components=capture_components,
+        lens=lens,
         extra_meta={
             "counterfactual": True,
             "interventions": [iv.record() for iv in interventions],
@@ -517,7 +520,8 @@ def persistence_profile(model, prompt: str, direction: np.ndarray,
                         seed: int = 0, device: str = "auto",
                         dtype: str = "float32",
                         top_k: int = 5,
-                        capture_attention: bool = False) -> PersistenceProfile:
+                        capture_attention: bool = False,
+                        lens=None) -> PersistenceProfile:
     """Trace an injected direction's effect through every downstream layer.
 
     Applies `scale * unit(direction)` as a `Perturb` at `(inject_layer,
@@ -533,7 +537,10 @@ def persistence_profile(model, prompt: str, direction: np.ndarray,
     already-computed steer at these exact settings — can be passed by callers
     that hold one (`pipeline.run_intervention`) to skip a forward pass, as
     with `score_against_control`. `capture_attention` applies to every pass
-    run here and must match a supplied baseline's (see `intervene`).
+    run here and must match a supplied baseline's (see `intervene`), and so
+    does `lens`: the profile reads every layer, where a tuned and a raw
+    readout differ (`score_against_control` reads only the last, where they
+    are the same).
     """
     from capture import capture
     from metrics import component_shares
@@ -546,7 +553,7 @@ def persistence_profile(model, prompt: str, direction: np.ndarray,
         baseline = capture(model, prompt, tokenizer=tokenizer, top_k=top_k,
                            device=device, dtype=dtype, keep_logits=True,
                            capture_components=True,
-                           capture_attention=capture_attention)
+                           capture_attention=capture_attention, lens=lens)
     shares = component_shares(baseline, token=token)          # (L-1, 2)
     inject_layer = int(inject_layer) % baseline.n_layers
 
@@ -554,13 +561,13 @@ def persistence_profile(model, prompt: str, direction: np.ndarray,
         branch = intervene(model, prompt, [Perturb(inject_layer, delta, token=token)],
                            tokenizer=tokenizer, top_k=top_k, device=device,
                            dtype=dtype, keep_logits=True,
-                           capture_attention=capture_attention)
+                           capture_attention=capture_attention, lens=lens)
     control = intervene(model, prompt,
                         [Perturb(inject_layer, _norm_matched_random(delta, seed),
                                  token=token)],
                         tokenizer=tokenizer, top_k=top_k, device=device,
                         dtype=dtype, keep_logits=True,
-                        capture_attention=capture_attention)
+                        capture_attention=capture_attention, lens=lens)
 
     records = []
     for layer in range(inject_layer, baseline.n_layers):

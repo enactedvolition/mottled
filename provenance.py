@@ -108,6 +108,9 @@ def _model(meta: dict, cfg) -> dict:
         "family": meta.get("family"),
         "device": meta.get("device"),
         "dtype": meta.get("dtype"),
+        # the readout the scene's logits, entropy and top-k came from; absent
+        # for a backend that does not report it
+        "lens": meta.get("lens"),
     }
 
 
