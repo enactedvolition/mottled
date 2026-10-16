@@ -67,6 +67,37 @@
   markup unescaped, a stored XSS via `?file=`; all are escaped, every scene value in markup is
   checked by a test, and `index.html` carries a Content-Security-Policy
   (`script-src 'self'`).
+- **Analysis verbs.** `mottled compare`, `sae` (fit report and top
+  features), `intervene` (divergence and effect against a norm-matched
+  random control; `-o` writes the scene) and `dose` (a `DoseSweep`) wrap
+  existing library calls and print JSON. `mottled arrays --format
+  npz|safetensors` exports a `.mtj`'s arrays, manifest included, for numpy,
+  torch or a notebook.
+- **Behaviour change:** bare `mottled` prints help instead of launching the
+  explorer, which is now `mottled ui` (`mottled app` still works and warns).
+- **Repair.** A steer applied at every position is scored as the mean shift
+  over all steered positions (`score_against_control(token=None)`), not the
+  last position's alone. MoE routing indices for interleaved stacks come
+  from the config (`decoder_sparse_step`, `mlp_only_layers`,
+  `first_k_dense_replace`/`moe_layer_freq`, `interleave_moe_layer_step`)
+  instead of being assumed to be the last n blocks.
+
+### Per-layer neighborhood preservation
+- Projection quality gains `per_layer` (k-NN preservation within each
+  layer, in both spaces), a cosine variant and `chance_layer`, its
+  expectation under random placement. The pooled score mostly measures
+  layer separation: on GPT-2 (8 prompts × 13 layers, as reported in #49) it
+  ranked a random projection above PCA (0.339 vs 0.318), while per layer
+  PCA leads (0.550 vs 0.447). The fields are optional, so existing callers
+  and `.mtj` files are unchanged.
+
+### The parity matrix runs clean
+- The `tlens` extra is capped at `transformer-lens>=1.14,<4`: 4.0 removed
+  `HookedTransformer`, so the unbounded extra installed a version Mottled
+  cannot import. `mottled parity`'s TransformerLens row loads GPT-2 without
+  TL's prepended BOS (HF prepends none, so the two sides compared different
+  token sequences), and its NNsight row gives a tokenizer with no pad token
+  the EOS token, since NNsight pads.
 
 ### The shotgun blast: one pellet per prompt
 - **`blast.py`** draws many prompts as one family: each prompt is one pellet,
