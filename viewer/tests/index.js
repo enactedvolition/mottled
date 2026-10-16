@@ -10,3 +10,4 @@ require("./bvh.test.js");
 require("./ops.test.js");
 require("./models.test.js");
 require("./reading.test.js");
+require("./blast.test.js");

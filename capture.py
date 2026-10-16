@@ -241,6 +241,7 @@ def capture(
     capture_attention: bool = False,
     capture_routing: bool = False,
     input_ids=None,
+    positions: list[int] | None = None,
 ) -> StateTrajectory:
     """Run a forward pass and capture the residual stream at every layer.
 
@@ -260,6 +261,14 @@ def capture(
     `capture_routing=True` records, for a sparse-MoE model, which experts each
     token was routed to per layer (`StateTrajectory.routing`). It refuses on a
     dense model rather than inventing a routing.
+
+    `positions` keeps only those token positions (negative counts from the
+    end), and runs the logit lens on them alone: the lens over every token
+    against a 150k vocabulary is most of a chat prompt's capture time, and a
+    reader of one position (`blast.pellets`) needs none of the rest. The
+    trajectory's T axis is then those positions, recorded in
+    meta["positions"]; the per-token-pair captures (components, attention,
+    routing) are refused with it rather than sliced.
     """
     _require_torch()
     return _run(model, prompt, tokenizer=tokenizer, top_k=top_k, device=device,
@@ -268,7 +277,8 @@ def capture(
                 capture_attention=capture_attention,
                 capture_routing=capture_routing,
                 input_ids=None if input_ids is None
-                else torch.as_tensor(input_ids).reshape(1, -1))
+                else torch.as_tensor(input_ids).reshape(1, -1),
+                positions=positions)
 
 
 def generate_and_capture(
@@ -375,7 +385,8 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
          capture_attention: bool = False,
          capture_routing: bool = False,
          input_ids: "torch.Tensor | None" = None,
-         logits_dtype: str = "float16") -> StateTrajectory:
+         logits_dtype: str = "float16",
+         positions: list[int] | None = None) -> StateTrajectory:
     """Forward pass (optionally intervened) -> StateTrajectory. Shared by
     capture(), intervene() and generate_and_capture().
 
@@ -387,6 +398,10 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
     array, but its rounding makes tiny KL steps and rank ties; `dose.py`
     asks for float32 so its smallest doses measure the model, not the cast.
     """
+    if positions is not None and (capture_components or capture_attention
+                                  or capture_routing):
+        raise ValueError("positions keeps a subset of tokens; components, attention "
+                         "and routing describe all of them and cannot be sliced to it")
     if isinstance(model, str):
         model, tokenizer = load_model(model, device=device, dtype=dtype)
     if tokenizer is None:
@@ -427,6 +442,17 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
         attention = torch.stack([a.float().mean(dim=1)[0] for a in out.attentions]).cpu().numpy()
 
     routing = _routing_from(out, model, capture_routing)
+
+    if positions is not None:
+        T = hidden.shape[1]
+        if not positions:
+            raise ValueError("positions is empty: name at least one token to keep")
+        if any(not -T <= p < T for p in positions):
+            raise ValueError(f"positions {positions} outside a {T}-token input")
+        positions = [p % T for p in positions]
+        hidden = hidden[:, positions]
+        tokens = [tokens[p] for p in positions]
+        extra_meta = {**(extra_meta or {}), "positions": positions}
 
     logits_t = logit_lens(hidden, cap.adapter)
     vocab = [_clean_token(t) for t in tokenizer.convert_ids_to_tokens(range(logits_t.shape[-1]))]
@@ -470,6 +496,42 @@ def _clean_token(tok) -> str:
     return str(tok).replace("▁", " ").replace("Ġ", " ").replace("Ċ", "\\n")
 
 
+def moe_block_indices(cfg, n_blocks: int, logits: list) -> list[int]:
+    """Which decoder block each non-None router-logits entry belongs to.
+
+    HF returns router logits either one entry per block (dense blocks as
+    None) or only for the MoE blocks. In the first case the position is the
+    block. In the second, MoE blocks can be *interleaved* with dense ones
+    (Qwen-MoE `decoder_sparse_step` / `mlp_only_layers`, DeepSeek
+    `first_k_dense_replace` + `moe_layer_freq`, Llama-4
+    `interleave_moe_layer_step`), so assuming they are the tail of the stack
+    mislabels every layer. Config says which; the tail is the last resort.
+    """
+    present = [i for i, l in enumerate(logits) if l is not None]
+    if len(logits) == n_blocks:
+        return present
+    n = len(present)
+    moe = None
+    if cfg is not None:
+        mlp_only = set(getattr(cfg, "mlp_only_layers", None) or [])
+        step = getattr(cfg, "decoder_sparse_step", None)
+        step = step or getattr(cfg, "interleave_moe_layer_step", None)
+        first_dense = getattr(cfg, "first_k_dense_replace", None)
+        freq = getattr(cfg, "moe_layer_freq", None)
+        if step:
+            moe = [i for i in range(n_blocks)
+                   if i not in mlp_only and (i + 1) % int(step) == 0]
+        elif first_dense is not None:
+            f = int(freq or 1)
+            moe = [i for i in range(n_blocks) if i >= int(first_dense) and i % f == 0]
+        elif mlp_only:
+            moe = [i for i in range(n_blocks) if i not in mlp_only]
+    if moe is not None and len(moe) == n:
+        return moe
+    first = max(0, n_blocks - n)
+    return list(range(first, first + n))
+
+
 def _routing_from(out, model, wanted: bool, spans=None):
     """Expert routing from a forward pass, or None.
 
@@ -505,6 +567,9 @@ def _routing_from(out, model, wanted: bool, spans=None):
     n_experts = int(getattr(cfg, "num_experts", 0)
                     or getattr(cfg, "n_routed_experts", 0) or 0)
 
+    n_blocks = len(list(getattr(model, "model", model).layers)) \
+        if hasattr(getattr(model, "model", model), "layers") else len(logits)
+    blocks = moe_block_indices(cfg, n_blocks, list(logits))
     layers = [l for l in logits if l is not None]
     if not layers:
         raise ValueError("router logits present but empty")
@@ -512,12 +577,6 @@ def _routing_from(out, model, wanted: bool, spans=None):
     k = k or min(2, n_experts)
 
     experts, weights, idx = [], [], []
-    n_blocks = len(list(getattr(model, "model", model).layers)) \
-        if hasattr(getattr(model, "model", model), "layers") else len(layers)
-    # MoE layers are usually the tail of the stack (dense ones come first),
-    # so align the returned rows to the *last* n blocks rather than assuming
-    # they start at 0.
-    first = max(0, n_blocks - len(layers))
     batch = len(spans) if spans else 1
     for m, lg in enumerate(layers):
         probs = torch.softmax(lg.float(), dim=-1)
@@ -527,7 +586,7 @@ def _routing_from(out, model, wanted: bool, spans=None):
             w = w.reshape(batch, -1, w.shape[-1])
         experts.append(e.cpu().numpy().astype(np.int32))
         weights.append((w / w.sum(-1, keepdim=True)).cpu().numpy().astype(np.float32))
-        idx.append(first + m)
+        idx.append(blocks[m])
 
     experts, weights = np.stack(experts), np.stack(weights)
     layer_idx = np.asarray(idx, dtype=np.int32)

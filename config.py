@@ -88,7 +88,8 @@ class MarbleConfig:
     trajectory_token: int = -1
 
     # caching
-    cache_dir: str = ".marble_cache"
+    cache_dir: str | None = None  # None: cache.default_dir("pipeline") —
+    # $MOTTLED_CACHE_DIR, else the per-user cache home (never the cwd)
     use_cache: bool = True
 
     def to_dict(self) -> dict:

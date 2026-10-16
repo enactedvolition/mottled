@@ -22,6 +22,18 @@ density terrain, swept from layer 0 to 12. The runs start apart and end in
 the same high-density region. The amber overlay is the density's standard
 error: it marks where the terrain rests on too few points to trust.*
 
+## Your first scene in two commands
+
+```bash
+pip install "mottled[models] @ git+https://github.com/enactedvolition/mottled"
+mottled export "The capital of France is" -o scene.mtj
+```
+
+Then open `scene.mtj` in the [hosted viewer](https://enactedvolition.github.io/mottled/viewer/):
+click **Open .mtj…** or drag the file onto the page. The file is read in your
+browser and is not uploaded anywhere. The first export downloads GPT-2 (about
+500 MB) and takes a minute or two on a CPU.
+
 ## Try it without installing anything
 
 **[enactedvolition.github.io/mottled](https://enactedvolition.github.io/mottled/)**
@@ -35,6 +47,8 @@ Hover anywhere along a trajectory for the inspector; click to pin it.
 | [`models-qwen-gpt2`](https://enactedvolition.github.io/mottled/viewer/?file=samples/models-qwen-gpt2.mtj) | two different models on one terrain |
 | [`gpt2-features`](https://enactedvolition.github.io/mottled/viewer/?file=samples/gpt2-features.mtj) | real SAE features, with their measured fit |
 | [`self-portrait`](https://enactedvolition.github.io/mottled/viewer/?file=samples/self-portrait.mtj) | Mottled pointed at itself (see below) |
+| [`blast/refusal`](https://enactedvolition.github.io/mottled/viewer/?file=samples/blast/refusal.mtj) | 48 requests, one pellet each: where harmful and harmless separate, layer by layer |
+| [`blast/truth`](https://enactedvolition.github.io/mottled/viewer/?file=samples/blast/truth.mtj) | true vs false answers, beside the negation readout that rivals it |
 
 The page can also **run a model itself**. Open *Run a model in this page*,
 pick one, and capture. The picker lists models checked to load completely,
@@ -49,18 +63,87 @@ have fetched once is served from the browser's cache after that.
 
 ## Install
 
+The `models` extra pulls in torch, which is about 2 GB with CUDA wheels. On a
+machine without a GPU, install the CPU-only build first to keep it smaller:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
 ```bash
 pip install "mottled[models] @ git+https://github.com/enactedvolition/mottled"
 
-mottled                                    # the Streamlit explorer
+mottled ui                                 # the Streamlit explorer (bare `mottled` prints help)
 mottled serve --model gpt2                 # web viewer + capture API
 mottled export "The capital of France is" -o scene.mtj
 mottled export "The residual stream" --generate 8 -o decode.mtj
 mottled export "The capital of France is" --models gpt2,distilgpt2 -o models.mtj
+mottled export-blast items.jsonl --model Qwen/Qwen2.5-0.5B-Instruct --chat -o blast.mtj
 mottled export-manifest scene.mtj          # what produced a scene, as JSON
 mottled parity                             # Mottled's capture vs HF, TL, NNsight
 mottled smoke                              # does this install actually work?
 ```
+
+### Analyses as commands, results as JSON
+
+Everything the explorer measures is also a command that prints one JSON
+document, so it pipes into `jq`, a notebook or CI:
+
+```bash
+mottled capture "the cat sat" "the dog sat" | mottled compare | jq .hausdorff
+mottled capture "the cat sat" | mottled sae --sae res.npz | jq '.[0].top_features'
+mottled intervene "The capital of France is" --layer -2 \
+    --direction-token " Paris" --scale 8 --target " Paris" --all-positions
+mottled dose "The capital of France is" --layer -2 --direction-token " Paris" \
+    --target " Paris" --grid=-2,-1,0,1,2
+```
+
+`intervene` and `dose` score the push against norm-matched random
+controls. With `--all-positions` the effect is measured at every position
+the push touched, not only the last one.
+
+### In a notebook
+
+A `.mtj` file is numpy arrays plus a JSON manifest:
+
+```python
+import statefile; manifest, arrays = statefile.read_container("run.mtj")  # arrays["hidden"]: (L, T, D)
+```
+
+or convert it for torch, safetensors or HF tooling:
+
+```bash
+mottled arrays run.mtj --format safetensors -o run.safetensors   # or --format npz
+```
+
+`docs/gancarz-vs-interp.md` says where the Unix philosophy and interp
+practice pull in different directions, and which way mottled went.
+
+### On the command line, the stages compose
+
+`export` is a convenience. Underneath it are stages that read stdin and
+write stdout, so they pipe like any Unix tool. Stdout carries only data;
+status goes to stderr, and only when you ask with `-v`:
+
+```bash
+mottled capture "The capital of France is" "The capital of Germany is" \
+  | mottled project > scene.mtj                 # = mottled export ... -o scene.mtj
+cat prompts.txt | mottled capture --model gpt2 > runs.mtj   # one prompt per line
+mottled project runs.mtj --projection umap --set grid_size=96 -o umap.mtj
+mottled inspect scene.mtj                       # one-screen summary
+mottled inspect scene.mtj --ndjson | jq -c 'select(.layer == 12) | {text, entropy}'
+mottled validate *.mtj                          # silent when valid, exit 1 when not
+```
+
+`capture` writes one trajectory container per prompt (a `.mtj` stream;
+`cat a.mtj b.mtj` is a stream too) and `project` turns any stream into one
+scene. `capture | project` produces exactly the scene `export` does. Exit
+status is 0 on success, 1 when the work failed or an input is invalid, 2
+for a usage error. Errors are one line on stderr (`--debug` or
+`MOTTLED_DEBUG=1` for the traceback). Nothing is overwritten without
+`-f`, and binary is never written to a terminal. `NO_COLOR` is honoured.
+The disk cache lives in the per-user cache directory (`$MOTTLED_CACHE_DIR`
+overrides it), never in the working directory.
 
 Every capture is a real model; `gpt2` is the default because it is the
 smallest honest one. The extras are `models` (torch and transformers, for
@@ -158,6 +241,33 @@ where it was trained.
   commit, device and dtype, SAE hashes, and each edit (a vector edit with
   its norm and a hash of its values). It is the parameterization a reproduction needs, not
   evidence that the run reproduces.
+
+## Many prompts at once: the shotgun blast
+
+A token-trajectory scene follows one prompt's tokens through one global
+projection, and on real captures that projection spends its axes on what you
+already know: which token, which layer. `mottled export-blast` takes a JSONL
+file of labelled prompts instead and makes each prompt one **pellet**, read
+where a deployed monitor would read it (the state before the model writes),
+with every layer framed around the family's centroid. Prompts that end on the
+same template token start as one point, so the picture is the spread.
+
+```json
+{"id": "h00", "text": "Explain how to …", "labels": {"harmful": 1, "refused": 1}}
+{"id": "q00t", "messages": [{"role": "user", "content": "…"}, {"role": "assistant", "content": "…"}],
+ "labels": {"false_claim": 0}, "group": "q00"}
+```
+
+The **monitor** layout puts on x the score a linear monitor for one label
+would give each pellet, cross-fitted so the split you see is held out, with
+its AUROC per layer next to a label-shuffle null band; the viewer toggles
+between a monitor per label and an unsupervised **open** layout, colours by
+any label, and rings the pellets whose labels disagree. A split is a readout
+of these prompts, not a mechanism, and the samples in
+[`viewer/samples/blast/`](viewer/samples/blast/README.md) show the confounds
+to look for: wording that differs between the classes, contrast pairs (hold
+them out together with `group`), and a surface feature, there negation, that
+reads as well as the label you meant.
 
 ## Where the states come from
 
@@ -329,14 +439,16 @@ and rendered by Mottled. Given the second one, GPT-2's top continuation is
 | `statefile.py` · `provenance.py` | the `.mtj` format and the analysis record it carries |
 | `models/` | producers: model families, TransformerLens, external states, API logprobs |
 | `viewer/` | the WebGL viewer and the in-browser capture stack, each JS file pinned to a Python reference by a conformance test |
-| `design_tokens.py` | every colour and font; the explorer's and viewer's styles mirror it, and a test fails on drift |
+| `mtjschema.py` · `cli.py` | the `.mtj` JSON Schemas and validator; the command-line stages |
+| `design_tokens.py` · `codegen.py` | every colour and font; `python -m codegen` generates the viewer's `tokens.js` and `:root` CSS, the Streamlit theme and `docs/schema/` from Python, and a test fails on drift |
 
 ## Docs
 
 - [`docs/validity.md`](docs/validity.md): the inferential contract, what each
   artifact licenses you to claim and the controls a research-grade claim
   needs on top
-- [`docs/mtj-format.md`](docs/mtj-format.md): the `.mtj` interchange spec
+- [`docs/mtj-format.md`](docs/mtj-format.md): the `.mtj` interchange spec,
+  with its generated JSON Schemas in [`docs/schema/`](docs/schema/)
 - [`docs/field-notes.md`](docs/field-notes.md): a dated orientation to the
   interpretability landscape, and the traps this project has already paid for
 - [`ROADMAP.md`](ROADMAP.md) · [`CHANGELOG.md`](CHANGELOG.md) ·

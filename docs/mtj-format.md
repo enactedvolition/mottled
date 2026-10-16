@@ -23,11 +23,35 @@ Array `offset`s in the manifest are relative to the **start of the blob**
 A JavaScript reader needs only `DataView` + `TypedArray`; a Python reader
 needs only `struct` + `numpy.frombuffer`. No compression, no dependencies.
 
+### Streams: several containers back to back
+
+A container is self-delimiting: it ends where its last array ends
+(`12 + M + max(offset + length)` over its arrays; `12 + M` when it has
+none). So containers can be concatenated, and a **`.mtj` stream** is just
+that: `mottled capture` writes one `kind: "trajectory"` container per
+prompt, and `cat a.mtj b.mtj | mottled project` reads both. A reader of a
+plain file reads the first container and may ignore the rest; a stream
+reader (`statefile.read_stream`, `mottled inspect`, `mottled validate`)
+reads containers until the end. Trailing NUL or space padding after the
+last container is allowed; any other trailing bytes are an error.
+
+### Numbers: strict JSON, non-finite values as `null`
+
+The manifest is strict JSON (RFC 8259). `NaN` and `Infinity` are not JSON,
+and a browser's `JSON.parse` rejects a whole file over one of them, so
+writers MUST write every non-finite number in the manifest as `null`
+(e.g. an unknown temperature, an AUROC on a layer that is one point).
+Readers treat `null` in a numeric field as "not a number". The binary
+arrays are unaffected: they hold IEEE-754 values, NaN included.
+Files written before this rule may contain a bare `NaN`; `mottled validate`
+reports them as errors, and the Python reader still loads them.
+
 ## Manifest
 
 ```jsonc
 {
   "format": "mottled-trajectory",
+  "schema": "mottled-trajectory/1",  // or "mottled-scene/1": see below
   "version": 1,
   "kind": "trajectory",              // or "scene"
   "meta": { "model": "gpt2", "prompt": "…", "backend": "transformers", … },
@@ -42,6 +66,29 @@ Array references always carry `dtype` (`float16` | `float32` | `int32`),
 `shape`, `offset`, and `length` (bytes; equals the product of the shape and
 the item size). Readers MUST ignore unknown manifest fields and unknown
 arrays — that is how the format stays stable while growing.
+
+### Schema ids and the published schemas
+
+Each manifest names its schema: `"schema": "mottled-scene/1"` for
+`kind: "scene"`, `"mottled-trajectory/1"` for `kind: "trajectory"`. The key
+is additive — files written before it existed simply lack it and stay
+valid (`mottled validate` warns; `--strict` makes it an error). The number
+changes only on a breaking change to that kind's manifest.
+
+The JSON Schemas (draft 2020-12) are published in
+[`docs/schema/`](schema/):
+[`mottled-scene-1.schema.json`](schema/mottled-scene-1.schema.json) and
+[`mottled-trajectory-1.schema.json`](schema/mottled-trajectory-1.schema.json).
+They are **generated** from `mtjschema.py` by `python -m codegen` and
+checked in CI, so they cannot drift from the validator. Strings that name
+an array carry the annotation `"x-mtj-array": true`. A schema can say what
+a manifest looks like but not whether the bytes agree with it, so
+`mottled validate` also checks: the header and magic, strict JSON, 16-byte
+alignment of every array, `length = product(shape) × item size`, every
+array lying inside the blob, every array reference resolving, the shapes
+agreeing (`tokens` vs `T`, `entropy` / `quality` as `(L, T)`), and finite
+hidden states. Any language can write `.mtj`; `mottled validate FILE` is the
+conformance check.
 
 ## `analysis` — the record of what produced the file *(optional)*
 
@@ -108,6 +155,12 @@ Round-trips a `StateTrajectory` at full fidelity. Fields:
   - `attention` — `(L-1, T, T)` float32,
   - `components.attn`, `components.mlp` — `(L-1, T, D)` float32,
   - `embedding_matrix` — `(V, D)` float32.
+- `inspector` *(optional)*: the inspector layers precomputed from the
+  embedding matrix and components, in the same shape as a scene run's
+  `inspector` (below) with arrays `inspector.nidx` / `inspector.nsim` /
+  `inspector.shares`. `mottled capture` writes it and, by default, omits
+  `embedding_matrix` and `vocab` — they are tens of MB for a real model and
+  the inspector is all a scene needs from them (`--full` keeps both).
 
 ## `kind: "scene"` — a viewer-ready bundle
 
@@ -166,6 +219,36 @@ Fields:
 - `comparisons` *(optional)*: for runs beyond the first, JSON summaries:
   `{ "label", "hausdorff", "dtw_normalized", "shared_tokens", "onset_layer",
      "readout_changed" }`.
+- `blast` *(optional)*: a **pellet family** (`blast.py`, `mottled
+  export-blast`): one pellet per prompt, read at one position, at every
+  layer. The scene keeps every required field, so a reader without this
+  record still draws something true: the terrain is flat (`2 x 2`, z = 0)
+  and there is one run whose `N` trajectories are the `N` pellets drawn at
+  the first layout, its `tokens` the pellet ids and its per-(layer, token)
+  arrays (`entropy`, `topk`, `quality`) per (layer, pellet). Each pellet's
+  `{ "id", "text", "labels": {name: 0 | 1 | null}, "group"?: str,
+  "read_at"?: int, "read_token": str }` is in `meta.pellets`, in run order:
+  `group` names pellets the monitor held out together, `read_at` / `read_token`
+  the token position the state was read at. The record:
+  `{ "schema": "mottled-blast/1", "range" → (N, L), "spread" → (L,),
+     "norm" → (L,), "skipped": [str, …], "layouts": [ … ] }`.
+  Positions are in units of each layer's mean state norm (`norm`), around
+  that layer's centroid, so each layer has its own frame. `range[i, l]` is
+  pellet `i`'s exact full-space distance from the centroid in that unit,
+  and `spread[l]` the family's RMS range. Each layout is
+  `{ "name", "method": "monitor" | "open", "driver": label name or null,
+     "positions" → (N, L, 2) float32, "quality" → (L, N) float32
+     neighbourhood preservation per layer (k = 5, at most half the family), "exact" / "fitted" / "projected":
+     [str, …] what each part of the picture is, "arrays": {name → ref},
+     "params": {…} }`. `monitor` arrays: `auroc`, `null05`, `null95` (L,)
+  — the cross-fitted readout AUROC of the driver label per layer and the
+  5th / 95th percentiles of the same statistic under label shuffles (NaN
+  where the layer is one point) — and `labelled` (N,) int32, 1 where the
+  pellet's driver label was used. `open` arrays: `shown` (L,), the share of
+  each layer's spread the camera keeps, and `mass` (N,), each pellet's
+  weight in choosing it; `params.copies` / `params.near_copies` list the
+  pellet pairs that shared a vote, and the pairs within 10% of that cut.
+  `skipped` says why a label could not drive a monitor.
 
 Array names for run `i` are conventionally prefixed `run{i}.` (e.g.
 `run0.points`) but viewers MUST resolve them through the manifest references,

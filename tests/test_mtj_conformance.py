@@ -74,3 +74,51 @@ def test_python_writer_decodes_in_js_viewer(tmp_path):
     assert list(js["p0shape"]) == list(pts0.shape)          # same geometry
     assert js["p0sum"] == pytest.approx(float(pts0.sum()), rel=1e-3)  # same bytes
     assert list(js["entshape"]) == list(py["runs"][0]["entropy"].shape)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_blast_record_decodes_in_js_viewer(tmp_path):
+    """The blast record (blast.py) reads the same in the viewer as in Python:
+    every layout, its positions and arrays, and the pellets."""
+    import numpy as np
+
+    import blast
+    from trajectory import StateTrajectory
+
+    rng = np.random.default_rng(0)
+    h = np.cumsum(rng.normal(size=(5, 12, 16)), axis=0).astype(np.float32)
+    h[0] = h[0, 0]                                       # the muzzle
+    pel = [{"id": f"p{i}", "text": f"prompt {i}", "labels": {"c": i % 2}} for i in range(12)]
+    t = StateTrajectory(hidden=h, tokens=[p["id"] for p in pel],
+                        meta={"axis": "pellets", "pellets": pel})
+    built, skipped = blast.layouts(t, null_draws=10)
+    path = tmp_path / "blast.mtj"
+    statefile.save_scene(blast.scene(t, built, skipped), path)
+
+    script = r"""
+      const MTJ = require(process.argv[1]);
+      const b = MTJ.loadScene(require("fs").readFileSync(process.argv[2])).blast;
+      const sum = (a) => { let s = 0; for (const v of a.data) if (!Number.isNaN(v)) s += v; return s; };
+      process.stdout.write(JSON.stringify({
+        names: b.layouts.map((l) => l.name), drivers: b.layouts.map((l) => l.driver),
+        psum: b.layouts.map((l) => sum(l.positions)), pshape: b.layouts[0].positions.shape,
+        auroc: sum(b.layouts[0].arrays.auroc), qshape: b.layouts[0].quality.shape,
+        fitted: b.layouts[0].fitted, ids: b.pellets.map((p) => p.id),
+        labels: b.pellets[3].labels, spread: sum(b.spread), rshape: b.range.shape,
+      }));
+    """
+    js = json.loads(subprocess.run(
+        ["node", "-e", script, str(ROOT / "viewer" / "mtj.js"), str(path)],
+        capture_output=True, text=True, check=True).stdout)
+
+    py = statefile.load_scene(path)["blast"]
+    assert js["names"] == [b.name for b in built] and js["drivers"] == ["c", None]
+    assert list(js["pshape"]) == [12, 5, 2] and list(js["qshape"]) == [5, 12]
+    assert js["psum"] == pytest.approx([float(x["positions"].sum()) for x in py["layouts"]],
+                                       rel=1e-5, abs=1e-5)
+    assert js["auroc"] == pytest.approx(float(np.nansum(py["layouts"][0]["arrays"]["auroc"])),
+                                        rel=1e-5)
+    assert js["fitted"] == built[0].fitted
+    assert js["ids"] == [p["id"] for p in pel] and js["labels"] == {"c": 1}
+    assert js["spread"] == pytest.approx(float(py["spread"].sum()), rel=1e-5)
+    assert list(js["rshape"]) == [12, 5]

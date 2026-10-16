@@ -2,7 +2,110 @@
 
 ## Unreleased
 
-## 0.3.0 — 2026-10-02
+## 0.3.0 — 2026-10-16
+
+### A command line that composes
+- **Stage commands that pipe.** `mottled capture` (prompts in, one trajectory
+  `.mtj` container per prompt out), `mottled project` (a trajectory stream
+  in, a scene out), `mottled inspect` (a summary, `--json`, or `--ndjson`
+  with one record per run/layer/token) and `mottled validate`. Each reads
+  stdin when given no file or `-` and writes stdout when piped or given
+  `-o -`. `capture | project` is byte-for-byte the scene `export` writes
+  (bar the record's timestamp); `export` is now literally the two stages.
+  Containers are self-delimiting, so `cat a.mtj b.mtj` is a valid stream.
+- **CLI conventions.** Stdout carries data only; status goes to stderr and
+  only with `-v` (`-vv` adds library progress bars, `-q` hides warnings).
+  `--version`. One-line errors, exit 1 for runtime errors and invalid input,
+  2 for usage, tracebacks only with `--debug` or `MOTTLED_DEBUG=1`. Empty
+  prompts, missing files, a non-model directory and an unknown hub id fail
+  before any work. No overwriting without `-f`; no binary to a terminal.
+  `NO_COLOR` honoured. `--help` lists one command per line, with examples.
+  `project --config FILE.json --set KEY=VALUE` exposes every `MarbleConfig`
+  field without Python.
+- **Behaviour change:** `export` and `export-blast` no longer overwrite an
+  existing output (pass `-f`), and their "wrote …" lines moved from stdout
+  to stderr behind `-v`. `export --models`' comparison summary is on stderr.
+- **Schemas.** Manifests carry `"schema": "mottled-scene/1"` or
+  `"mottled-trajectory/1"` (additive). JSON Schemas for both are generated
+  from `mtjschema.py` into `docs/schema/`; `mottled validate` checks a file
+  against them plus the byte layout, references and shapes.
+- **Strict JSON.** Writers no longer emit `NaN`/`Infinity` (which made the
+  viewer's `JSON.parse` reject logprobs scenes); non-finite manifest numbers
+  are written as `null`, the documented convention.
+- **Repair.** The pipeline cache key covers every `MarbleConfig` field by
+  construction (dtype, device, keep_logits, grid_padding, marble_lift … were
+  missing), plus the Mottled version and the model revision. The cache moved
+  from `./.marble_cache` to the per-user cache directory
+  (`$MOTTLED_CACHE_DIR`, `$XDG_CACHE_HOME/mottled`, or the platform default).
+  `remote.py` keys cached headers, layer files and metadata by source (repo
+  + revision, and the commit when the host reports it), so one cache no
+  longer serves one model's offsets to another. Failed Neuronpedia label
+  lookups are reported on stderr instead of dropped. `import pipeline` no
+  longer imports torch.
+- **Generation.** `python -m codegen` writes `docs/schema/`, the viewer's
+  palette (`viewer/tokens.js`), its `:root` CSS block and the Streamlit
+  theme from Python sources; CI fails on drift.
+- **Viewer.** Scene values (the comparison table's shared tokens, prompt
+  and seed counts, SAE feature ids, legend counts) were interpolated into
+  markup unescaped, a stored XSS via `?file=`; all are escaped, every scene value in markup is
+  checked by a test, and `index.html` carries a Content-Security-Policy
+  (`script-src 'self'`).
+
+### The shotgun blast: one pellet per prompt
+- **`blast.py`** draws many prompts as one family: each prompt is one pellet,
+  read at one position (by default the state before the model writes), and
+  every layer gets its own frame around the family's centroid. Where every
+  prompt ends on the same template token, layer 0 is one point and the spread
+  with depth is the content. It replaces nothing: the token-trajectory scene
+  stays. On real captures its single global projection spent its axes on what
+  the reader already knew: in the bundled GPT-2 capitals scene one
+  attention-sink token's path is ~15x the others', and which prompt a state
+  came from explains none of the on-screen variance.
+- Two layouts. **monitor**: x is the score a deployed linear monitor would
+  read for one label, K-fold cross-fitted so a split is held out rather than
+  memorised, with its AUROC per layer beside a label-shuffle null band; y is
+  the largest variation x leaves out. Items can share a `group` (a contrast
+  pair), held out together: scoring a pellet while its twin is in training
+  put 9 of 25 layers below the null on TruthfulQA pairs, and the null
+  itself only moves labels as the pair design could. A grouping that would
+  train a fold on one class is refused rather than drawn. **open**:
+  unsupervised, one camera per layer from the pellet patterns the layers
+  agree on; a pellet is never drawn further out than its full-space
+  distance.
+- **`mottled export-blast items.jsonl`**: `{"id", "text" or "messages",
+  "labels", "group"}` per line; `--chat` reads at the generation prompt, and
+  an item ending on an assistant turn is read at its claim's last token.
+  `capture(positions=[...])` runs the logit lens on those positions only,
+  which made a 48-prompt chat export take seconds rather than half an hour
+  on CPU.
+- The scene is an ordinary `kind: "scene"` (flat terrain, one run of
+  pellets) plus an additive `blast` record, so older viewers still draw it;
+  `mtj.js` resolves the record and the viewer gets a layout toggle, colour by
+  label, rings on pellets whose labels disagree, and the per-layer readout.
+- Samples in `viewer/samples/blast/` (not in the wheel): refusal on
+  Qwen2.5-0.5B-Instruct (AdvBench requests against harmless ones written in
+  the same style) and TruthfulQA true/false answer pairs, whose second label
+  shows the "truth" readout sits beside a stronger negation one.
+
+### Browser-built scenes are no longer mirrored
+- `viewer/scene.js` fixed PCA signs the way scikit-learn < 1.5 did (U-based
+  `svd_flip`); scikit-learn 1.5 switched to V-based, so a scene built in the
+  browser came out mirrored on one or both axes against the Python-built one
+  on 12 of 20 test inputs. Both sides now use the V-based rule, and
+  `projection.PCAProjection` pins it instead of inheriting it from whichever
+  scikit-learn is installed (a no-op on >= 1.5). The conformance test checks
+  eight inputs, not the one that happened to agree.
+
+### Music-QA honesty demo scenes
+- **`viewer/samples/music-qa-honesty/`**: five Qwen2.5-0.5B-Instruct prior /
+  percept / paired scenes (sycophancy, citation hallucination, noisy input,
+  memorization, register break), each with its `export-manifest` record and a
+  README that leads with their low projection fidelity: read the layer-wise
+  readouts over the 2D picture. Item 1 uses the chat template; the rest are
+  raw prompts. All prompt text is original or public domain. Not bundled in
+  the wheel.
+- Stale `bobgnarly420.github.io` / `BobGnarly420/mottled` links in the README,
+  landing page and `pyproject.toml` now point at `enactedvolition`.
 
 ### Models too big to hold (M7)
 - **`stream.stream_capture`** runs a forward pass with one block's weights in
