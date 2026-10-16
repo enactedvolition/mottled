@@ -79,7 +79,7 @@ def serve(tmp_path):
         srv.RequestHandlerClass = lambda *a, **k: handler(
             *a, directory=str(directory), **k)
         srv.RequestHandlerClass.hits = handler.hits
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
         servers.append(srv)
         return f"http://127.0.0.1:{srv.server_address[1]}/", handler
 
