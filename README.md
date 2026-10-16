@@ -171,7 +171,10 @@ This matters more than the feature list, so it comes first.
   only in the projection is a pattern about the projection.
 - **The logit lens is a readout diagnostic**: what the output head would say
   if pointed at an intermediate state, not the model's belief at that
-  layer. Nearest tokens are *representation-space* neighbors; whether they
+  layer. The raw lens is also biased, most at early layers; `--lens tuned`
+  reads each layer through the published tuned lens for the model (GPT-2,
+  Pythia-deduped, Llama-2/3, OPT), which corrects much of that and is still
+  a readout. Nearest tokens are *representation-space* neighbors; whether they
   are semantic neighbors is a hypothesis the display does not test.
 - **Fidelity is stated inline.** Every scene reports how much of each
   state's neighborhood survived the projection. The density's bootstrap
@@ -430,6 +433,7 @@ and rendered by Mottled. Given the second one, GPT-2's top continuation is
 | | |
 |---|---|
 | `capture.py` | hooks on every block + the logit lens → `StateTrajectory` |
+| `tuned_lens.py` | the tuned lens: per-layer translators that correct the raw lens's bias |
 | `pipeline.py` · `render.py` · `ui.py` | the pipeline (pure), its Plotly figures, the Streamlit shell and flat API |
 | `projection.py` · `density.py` · `terrain.py` | projection with per-state fidelity, density with its standard error, the terrain mesh |
 | `compare.py` · `crossmodel.py` | comparison within a model, and across models in readout space |

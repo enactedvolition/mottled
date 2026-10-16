@@ -108,8 +108,10 @@ hashes; this is where the file states them itself.
   "models": [                          // one entry per run, in run order
     { "id": "gpt2", "revision": "e7da7f2",  // hub commit, null if not from one
       "backend": "transformers", "family": "gpt2",
-      "device": "cpu", "dtype": "float32" }
-  ],
+      "device": "cpu", "dtype": "float32",
+      "lens": { "kind": "logit" } }    // the readout the logits are; a tuned
+  ],                                   // lens adds source, revision and
+                                       // base_model_revision. Absent: raw lens
   "environment": {
     "python": "3.11.9", "platform": "Linux-6.8.0-x86_64",
     "packages": { "numpy": "2.1.0", "torch": "2.4.0", … }

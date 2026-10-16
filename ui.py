@@ -33,6 +33,7 @@ from config import (
 )
 from neighbors import TokenNeighbors
 from trajectory import StateTrajectory
+from tuned_lens import EARLY_LAYER_CAVEAT, readout_name
 
 # The flat public API: these lived in this module before it was split, and
 # every caller (README, tests, cli.py, serve.py, notebooks) still imports them
@@ -276,6 +277,11 @@ def main() -> None:
         proj_name = st.selectbox("Projection", PROJECTION_CHOICES, key="projection")
         dens_name = st.selectbox("Density estimator", DENSITY_CHOICES, key="density")
         top_k = st.slider("Top-k", 1, 10, 5, key="top_k")
+        lens = st.selectbox("Readout lens", ["logit", "tuned"], key="lens",
+                            help="logit: the raw logit lens, biased at early layers. "
+                                 "tuned: the published tuned lens for this model "
+                                 "(GPT-2, Pythia-deduped, Llama-2/3, OPT; none yet "
+                                 "for Qwen), which corrects most of that bias.")
         if chat_on:
             gen_tokens = st.slider("Reply tokens", 1, 32, 32, key="reply_tokens",
                                    help="The most tokens a reply may run to; it "
@@ -321,7 +327,8 @@ def main() -> None:
 
     asked = MarbleConfig(model=model_name, projection=proj_name, density=dens_name,
                          top_k=top_k, trajectory_mode=mode, invert_terrain=invert,
-                         generate_tokens=gen_tokens, generate_temperature=gen_temp)
+                         generate_tokens=gen_tokens, generate_temperature=gen_temp,
+                         lens=lens)
     if chat_on:
         col_chat, col_viz = st.columns([2, 3])
         with col_chat:
@@ -604,7 +611,9 @@ def main() -> None:
                 "of what happened, not identified causes.\n"
                 "- Logit-lens readouts are **probe diagnostics** — what the "
                 "output head would say if pointed at an intermediate state — "
-                "and nearest-token lists are **representation-space** "
+                "and the raw lens is **biased, most at early layers**; the "
+                "*tuned* readout lens corrects much of that and is still a "
+                "readout. Nearest-token lists are **representation-space** "
                 "neighbors, not verified semantic ones.\n"
                 "- An SAE overlay is only as interpretable as the SAE you load; the "
                 "bundled `demo_sae` is a random dictionary (decorative). Load real "
@@ -674,7 +683,10 @@ def main() -> None:
         a.metric("Entropy", f"{state.entropy:.2f} nats")
         b.metric("Vector norm", f"{state.norm:.1f}")
 
-        st.markdown("**Top predictions**")
+        lens_name = readout_name(traj.meta)
+        st.markdown(f"**Top predictions** *({lens_name})*")
+        if lens_name == "logit lens":
+            st.caption(EARLY_LAYER_CAVEAT[0].upper() + EARLY_LAYER_CAVEAT[1:] + ".")
         for tok, p in state.topk[: cfg.top_k]:
             st.progress(min(max(p, 0.0), 1.0), text=f"{tok!r} — {p:.1%}")
 

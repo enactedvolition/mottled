@@ -242,6 +242,7 @@ def capture(
     capture_routing: bool = False,
     input_ids=None,
     positions: list[int] | None = None,
+    lens=None,
 ) -> StateTrajectory:
     """Run a forward pass and capture the residual stream at every layer.
 
@@ -269,6 +270,9 @@ def capture(
     trajectory's T axis is then those positions, recorded in
     meta["positions"]; the per-token-pair captures (components, attention,
     routing) are refused with it rather than sliced.
+
+    `lens` (a `tuned_lens.TunedLens`) reads every layer through that tuned
+    lens instead of the raw logit lens; `meta["lens"]` records which ran.
     """
     _require_torch()
     return _run(model, prompt, tokenizer=tokenizer, top_k=top_k, device=device,
@@ -278,7 +282,7 @@ def capture(
                 capture_routing=capture_routing,
                 input_ids=None if input_ids is None
                 else torch.as_tensor(input_ids).reshape(1, -1),
-                positions=positions)
+                positions=positions, lens=lens)
 
 
 def generate_and_capture(
@@ -295,6 +299,7 @@ def generate_and_capture(
     capture_components: bool = False,
     capture_attention: bool = False,
     input_ids=None,
+    lens=None,
 ) -> StateTrajectory:
     """Autoregressively decode, then capture the completed sequence.
 
@@ -375,7 +380,7 @@ def generate_and_capture(
                 keep_logits=keep_logits, extra_meta={"generation": generation},
                 capture_components=capture_components,
                 capture_attention=capture_attention,
-                input_ids=input_ids)
+                input_ids=input_ids, lens=lens)
 
 
 def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
@@ -386,7 +391,8 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
          capture_routing: bool = False,
          input_ids: "torch.Tensor | None" = None,
          logits_dtype: str = "float16",
-         positions: list[int] | None = None) -> StateTrajectory:
+         positions: list[int] | None = None,
+         lens=None) -> StateTrajectory:
     """Forward pass (optionally intervened) -> StateTrajectory. Shared by
     capture(), intervene() and generate_and_capture().
 
@@ -454,7 +460,11 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
         tokens = [tokens[p] for p in positions]
         extra_meta = {**(extra_meta or {}), "positions": positions}
 
-    logits_t = logit_lens(hidden, cap.adapter)
+    if lens is None:
+        logits_t = logit_lens(hidden, cap.adapter)
+    else:
+        from tuned_lens import translate
+        logits_t = logit_lens(translate(hidden, lens), cap.adapter)
     vocab = [_clean_token(t) for t in tokenizer.convert_ids_to_tokens(range(logits_t.shape[-1]))]
     logits = logits_t.numpy()
     entropy, topk = _entropy_topk(logits, vocab, top_k)
@@ -471,6 +481,9 @@ def _run(model, prompt, tokenizer=None, top_k=5, device="auto", dtype="float32",
         "revision": getattr(config, "_commit_hash", None),
         "device": str(model_device),
         "dtype": str(next(model.parameters()).dtype).removeprefix("torch."),
+        # which readout the logits, entropy and top-k are: the raw lens is
+        # biased at early layers, and a reader of either needs to know which
+        "lens": {"kind": "logit"} if lens is None else lens.record(),
     }
     if extra_meta:
         meta.update(extra_meta)

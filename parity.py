@@ -180,7 +180,10 @@ def against_transformer_lens(name: str, prompt: str = DEFAULT_PROMPT) -> Compari
     from capture import capture, load_model
     from models.hooked import from_hooked_transformer
 
-    ht = tl.HookedTransformer.from_pretrained_no_processing(name)
+    # No BOS: TL prepends one for GPT-2 by default, HF does not, and parity
+    # needs both sides to run the same tokens.
+    ht = tl.HookedTransformer.from_pretrained_no_processing(
+        name, default_prepend_bos=False)
     model, tokenizer = load_model(name)
     with torch.no_grad():
         theirs = from_hooked_transformer(ht, prompt)
@@ -243,6 +246,8 @@ def trace_with_nnsight(model, tokenizer, prompt: str, tokens=None):
 
     block_path, _ = resolve_paths(model)
     n_blocks = len(_walk(model, block_path))
+    if tokenizer.pad_token is None:      # NNsight pads; GPT-2 has no pad token
+        tokenizer.pad_token = tokenizer.eos_token
     lm = nnsight.LanguageModel(model, tokenizer=tokenizer)
     envoy = _walk(lm, block_path)
 

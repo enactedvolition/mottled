@@ -36,9 +36,9 @@ NO_COLOR (plain stderr), HF_TOKEN (gated models).
 # MarbleConfig fields that belong to the capture stage. `mottled capture`
 # records them in each trajectory's analysis record and `mottled project`
 # takes them from there, so a scene's record states what actually ran.
-CAPTURE_FIELDS = ("model", "device", "dtype", "keep_logits", "capture_components",
-                  "capture_attention", "generate_tokens", "generate_temperature",
-                  "top_k", "seed")
+CAPTURE_FIELDS = ("model", "device", "dtype", "keep_logits", "lens",
+                  "capture_components", "capture_attention", "generate_tokens",
+                  "generate_temperature", "top_k", "seed")
 
 
 # ------------------------------------------------------------- plumbing
@@ -106,6 +106,14 @@ def _silence_transformers(ctx: Ctx) -> None:
         hf_logging.set_verbosity_error()
         hf_logging.disable_progress_bar()
     except Exception:  # transformers missing or reorganised: nothing to quiet
+        pass
+    try:
+        # a tuned lens is fetched with huggingface_hub directly, outside the
+        # transformers logger, and its unauthenticated-request advisory is noise
+        from huggingface_hub.utils import logging as hub_logging
+
+        hub_logging.set_verbosity_error()
+    except Exception:
         pass
 
 
@@ -280,7 +288,7 @@ def cmd_capture(args, ctx: Ctx) -> int:
     cfg = MarbleConfig(model=args.model, device=args.device, dtype=args.dtype,
                        generate_tokens=args.generate,
                        generate_temperature=args.temperature, seed=args.seed,
-                       keep_logits=not args.no_logits, use_cache=False)
+                       keep_logits=not args.no_logits, lens=args.lens, use_cache=False)
     model, tokenizer = load_model(cfg.model, device=cfg.device, dtype=cfg.dtype)
     for prompt in prompts:
         traj = pipeline._capture_with(cfg, prompt, model=model, tokenizer=tokenizer)
@@ -383,7 +391,7 @@ def cmd_export(args, ctx: Ctx) -> int:
     for name in names:
         _check_model(name)
     _silence_transformers(ctx)
-    cfg = MarbleConfig(model=args.model, use_cache=False,
+    cfg = MarbleConfig(model=args.model, use_cache=False, lens=args.lens,
                        generate_tokens=args.generate,
                        generate_temperature=args.temperature)
 
@@ -983,6 +991,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("-f", "--force", action="store_true",
                        help="overwrite FILE if it exists; allow binary to a terminal")
 
+    def lens_arg(p):
+        p.add_argument("--lens", default="logit", metavar="LENS",
+                       help="readout: logit (raw lens, biased at early layers; default), "
+                            "tuned (the published tuned lens for --model), or a "
+                            "tuned-lens directory")
+
     p = add("capture", "prompts -> trajectory .mtj, one container per prompt",
             epilog="examples:\n  mottled capture \"The cat sat\" -o run.mtj\n"
                    "  cat prompts.txt | mottled capture --model gpt2 | mottled project > s.mtj")
@@ -998,6 +1012,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dtype", default="float32", help="float32 | float16 | bfloat16")
     p.add_argument("--no-logits", action="store_true",
                    help="omit logit-lens logits (smaller; scenes lose readout-change onsets)")
+    lens_arg(p)
     p.add_argument("--full", action="store_true",
                    help="also keep the (V, D) embedding matrix and vocabulary")
     out_args(p)
@@ -1048,6 +1063,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also write the analysis record as standalone JSON")
     p.add_argument("--models", default=None, metavar="A,B",
                    help="compare several models on ONE prompt, in readout space")
+    lens_arg(p)
     out_args(p, default="scene.mtj")
     p.set_defaults(func=cmd_export)
 

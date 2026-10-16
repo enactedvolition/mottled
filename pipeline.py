@@ -158,6 +158,12 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
     return result
 
 
+def _lens(cfg: MarbleConfig):
+    """The tuned lens `cfg.lens` names, or None for the raw logit lens."""
+    import tuned_lens
+    return tuned_lens.resolve(cfg.lens, cfg.model)
+
+
 def _capture_with(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
                   input_ids=None) -> StateTrajectory:
     """One validated capture under the config's capture knobs.
@@ -175,6 +181,7 @@ def _capture_with(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
         capture_components=cfg.capture_components,
         capture_attention=cfg.capture_attention,
         input_ids=input_ids,
+        lens=_lens(cfg),
     )
     target = model if model is not None else cfg.model
     if cfg.generate_tokens > 0:
@@ -575,7 +582,8 @@ def run_intervention(cfg: MarbleConfig, prompt: str, interventions: list,
                        top_k=cfg.top_k, device=cfg.device, dtype=cfg.dtype,
                        keep_logits=cfg.keep_logits,
                        capture_attention=cfg.capture_attention,
-                       capture_components=cfg.capture_components)
+                       capture_components=cfg.capture_components,
+                       lens=_lens(cfg))
     branch.validate()
 
     result = {"prompts": [prompt, prompt], "prompt": prompt,
@@ -605,7 +613,7 @@ def run_intervention(cfg: MarbleConfig, prompt: str, interventions: list,
                 scale=float(np.linalg.norm(iv.vector)),
                 baseline=baseline, branch=branch, seed=cfg.seed,
                 device=cfg.device, dtype=cfg.dtype, top_k=cfg.top_k,
-                capture_attention=cfg.capture_attention)
+                capture_attention=cfg.capture_attention, lens=_lens(cfg))
     return result
 
 

@@ -157,11 +157,32 @@ predictions and entropies are therefore **probe/readout diagnostics** —
 "what the output head would say if pointed here" — not evidence that the
 model "believes" or has committed to a token at that layer.
 
-Stronger validation, none of it implemented here: tuned-lens or affine
-probes fitted on held-out prompts, compared against the raw lens;
-intermediate prediction stability compared against actual causal
-predictiveness of those states; calibration and rank correlation between
-intermediate readout scores and the final output distribution.
+The raw lens is not only unvalidated but **biased**, and measurably so. On
+GPT-2 (mean over four prompts) its layer-0 readout sits 40.5 nats of KL from
+the model's own output distribution and layers 1–3 sit 4.6–5.2; early
+layers read as the input token, not as an early draft of the prediction. So
+a raw-lens onset — "top-1 is X from layer N" — says as much about where the
+head's basis becomes legible as about where the computation arrives.
+
+**What is implemented.** `--lens tuned` (`MarbleConfig.lens`,
+`tuned_lens.py`) reads every layer but the last through the tuned lens of
+Belrose et al. (2023): a per-layer affine translator fitted to minimise KL
+from the model's own output, as published for GPT-2, Pythia-deduped,
+Llama-2/3 and OPT, or any directory the `tuned-lens` package trains. On the
+same prompts it brings layer 0 to 4.7 nats and layers 1–3 to 1.6–1.9. Every
+trajectory records which lens produced its readouts (`meta["lens"]`, and per
+run in the analysis record). The viewer's inspector, the explorer's top
+predictions and the basin prose name the lens and, for the raw one, say it is
+biased at early layers; comparison onsets (`readout_changed`), `mottled
+inspect` and plot hover text do not yet.
+
+**What remains.** A tuned lens is still a readout: a better-calibrated
+answer to "what would the head say", not the model's belief. It was fitted on
+the lens authors' corpus, not your prompts, and against one revision of the
+weights (`base_model_revision`, recorded). No published lens covers Qwen, the
+default modern model here; train one with the `tuned-lens` package. Still not
+implemented: intermediate prediction stability compared against the causal
+predictiveness of those states, and calibration of intermediate readouts.
 
 ## A blast monitor is a held-out readout
 
