@@ -49,10 +49,10 @@ the viewer, not results about any model beyond the one captured here.
   don't, doesn't, isn't, cannot, no comment, depends, unknown). 12 of 24
   true answers carry one and 2 of 24 false ones; that one bit alone reads
   0.71 for `false_claim`.
-- **What it shows:** `monitor · false_claim` reads 0.54 at layer 0 and 0.64
-  to 0.82 from layer 1, above its shuffle null at 24 of 25 layers (the null
+- **What it shows:** `monitor · false_claim` reads 0.54 at layer 0 and 0.63
+  to 0.83 from layer 1, above its shuffle null at 24 of 25 layers (the null
   moves labels only in ways the pair design could, see `blast._shuffle`).
-  `monitor · negation` reads 0.88 to 0.93 from layer 15. Read together: a
+  `monitor · negation` reads 0.87 to 0.93 from layer 15. Read together: a
   held-out readout ranks false answers above true ones, and ranks negated
   claims above plain ones more strongly, so a "truth monitor" fitted on this
   set may be a negation monitor. Colouring by `negation` under the

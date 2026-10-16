@@ -4,9 +4,10 @@
 
 // ---------------------------------------------------------------- constants
 // Incision data palette — accent blue, live teal, risk amber, loss red,
-// payout green, then lightened variants. Mirrors ui.py's _MARBLE_COLORS.
-const PALETTE = ["#4B7CF3", "#00CCA8", "#D4934A", "#E05050", "#38B07A",
-                 "#8FA7F7", "#5CE0C6", "#E6B884", "#F08A8A", "#7FD0AC"];
+// payout green, then lightened variants. tokens.js is generated from
+// design_tokens.MARBLE_COLORS (`python -m codegen`), the palette the Plotly
+// renderer draws with, so the two cannot drift.
+const PALETTE = MOTTLED_TOKENS.marbleColors;
 // draw/skip fine-segment run lengths, cycled per run: solid, dash, dot, longdash, dashdot
 const DASH_CYCLE = [null, [5, 3], [1, 2], [9, 3], [5, 2, 1, 2]];
 const SEG = 8;              // Catmull-Rom subdivisions per layer span
@@ -813,7 +814,7 @@ function setPickInfo(pick, pinned) {
     if (feat) {
       const re = run.features.recon_error;
       const extrap = re && pick.layer < re.data.length && re.data[pick.layer] > 0.5;
-      html += `<div><span class="mono">feature f${feat.id} · ${feat.act.toFixed(2)}</span>` +
+      html += `<div><span class="mono">feature f${esc(feat.id)} · ${feat.act.toFixed(2)}</span>` +
               (extrap ? `<span class="dim"> (extrapolation)</span>` : "") + `</div>`;
     }
   }
@@ -959,7 +960,7 @@ function buildUI(scene) {
     ui.comparisons.innerHTML = "<table><tr><th></th><th>hausdorff</th><th>dtw</th><th>shared</th></tr>" +
       scene.comparisons.map((c) =>
         `<tr><td><b>${esc(c.label ?? "?")}</b></td><td>${fmt(c.hausdorff)}</td>` +
-        `<td>${fmt(c.dtw_normalized)}</td><td>${c.shared_tokens ?? "–"}</td></tr>`).join("") + "</table>";
+        `<td>${fmt(c.dtw_normalized)}</td><td>${esc(c.shared_tokens ?? "–")}</td></tr>`).join("") + "</table>";
   } else ui.comparisons.innerHTML = "";
 
   const hasAttn = scene.runs.some((r) => r.attention);
@@ -1015,10 +1016,10 @@ function renderReading(scene, keepOpen) {
     const models = p.models.map((m) =>
       esc(m.id) + (m.revision ? ` <span class="mono dim">@${esc(m.revision.slice(0, 7))}</span>` : "")
     ).join(", ");
-    const bits = [`${p.prompts} prompt${p.prompts === 1 ? "" : "s"}`];
+    const bits = [`${esc(p.prompts)} prompt${p.prompts === 1 ? "" : "s"}`];
     if (p.projection) bits.push(`${esc(p.projection)} projection`);
     if (p.density) bits.push(`${esc(p.density)} density`);
-    if (p.seed !== null) bits.push(`seed ${p.seed}`);
+    if (p.seed !== null) bits.push(`seed ${esc(p.seed)}`);
     if (p.sae && p.sae.source) bits.push(`SAE ${esc(p.sae.source)}`);
     rows.push(
       `<p class="reading-prov"><b>What produced this.</b> ${models} · ` +
@@ -1182,10 +1183,10 @@ function renderBlastPanel() {
   ui.blastColour.value = state.blast.colour;
   const lg = MTJ.blastLegend(b, lay, state.blast.colour);
   ui.blastLegend.innerHTML = !lg ? "" : lg.rows.map((r) =>
-    `<span class="lg"><span class="blast-swatch" style="background:${r.colour}"></span>` +
-    `${esc(r.text)} <span class="dim">(${r.count})</span></span>`).join("") +
+    `<span class="lg"><span class="blast-swatch" style="background:${esc(r.colour)}"></span>` +
+    `${esc(r.text)} <span class="dim">(${esc(r.count)})</span></span>`).join("") +
     (lg.ring ? `<span class="lg"><span class="blast-swatch ring"></span>${esc(lg.ring.text)} ` +
-               `<span class="dim">(${lg.ring.count})</span></span>` : "");
+               `<span class="dim">(${esc(lg.ring.count)})</span></span>` : "");
   ui.blastCaptionBody.innerHTML = MTJ.blastCaption(b, lay).map((c) =>
     `<p><span class="cap-kind">${esc(c.kind)}</span> ${esc(c.text)}</p>`).join("");
   renderBlastReadout();

@@ -100,3 +100,64 @@ def test_registry_plugin():
         assert np.array_equal(p.fit_transform(X), X[:, :2])
     finally:
         del PROJECTIONS["identity"]
+
+
+# ---- within-layer preservation (per_layer_preservation) ----------------
+
+def _layered(seed=0, L=6, T=12, D=32):
+    """States whose layers sit far apart (big per-layer offset) but which
+    carry real within-layer structure (a low-rank token signal)."""
+    rng = np.random.default_rng(seed)
+    tok = rng.normal(size=(T, 2)) @ rng.normal(size=(2, D))
+    offs = rng.normal(size=(L, 1, D)) * 50.0
+    return offs + tok[None] + 0.01 * rng.normal(size=(L, T, D))
+
+
+def test_per_layer_preservation_is_perfect_for_an_exact_projection():
+    from projection import per_layer_preservation
+    H = _layered()
+    Y = (H - H.mean(axis=1, keepdims=True)) @ np.linalg.svd(
+        (H - H.mean(axis=1, keepdims=True)).reshape(-1, H.shape[-1]),
+        full_matrices=False)[2][:2].T
+    assert per_layer_preservation(H, Y, k=4).mean() > 0.95
+
+
+def test_pooled_score_survives_within_layer_scramble_but_per_layer_does_not():
+    """The failure the per-layer score exists to catch: keep each layer's 2-D
+    point set, reassign it to random tokens. Layer separation is untouched,
+    within-layer fidelity is destroyed."""
+    from projection import (neighborhood_preservation, per_layer_preservation,
+                            preservation_chance, project)
+    H = _layered()
+    L, T, D = H.shape
+    Y, _ = project(H, method="pca")
+    rng = np.random.default_rng(1)
+    Z = np.stack([Y[l][rng.permutation(T)] for l in range(L)])
+    pooled = lambda C: neighborhood_preservation(H.reshape(-1, D), C.reshape(-1, 2), k=10).mean()
+    assert pooled(Z) > 0.6 * pooled(Y)          # pooled barely notices
+    good = per_layer_preservation(H, Y, k=4).mean()
+    bad = per_layer_preservation(H, Z, k=4).mean()
+    assert bad < preservation_chance(T, 4) + 0.15 < good
+
+
+def test_cosine_metric_ignores_scale():
+    from projection import neighborhood_preservation
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, 16))
+    Y = X[:, :2]
+    scaled = X * rng.uniform(0.1, 10, size=(40, 1))
+    a = neighborhood_preservation(X, Y, k=5, metric="cosine")
+    b = neighborhood_preservation(scaled, Y, k=5, metric="cosine")
+    np.testing.assert_allclose(a, b)
+    with pytest.raises(ValueError):
+        neighborhood_preservation(X, Y, metric="manhattan")
+
+
+def test_projection_quality_carries_per_layer_fields(hidden):
+    from projection import project, projection_quality
+    coords, proj = project(hidden, method="pca")
+    q = projection_quality(hidden, coords, proj)
+    L, T = hidden.shape[:2]
+    assert q.per_layer.shape == (L, T) and q.per_layer_cosine.shape == (L, T)
+    assert q.k_layer == min(5, T - 1)
+    assert 0 < q.chance_layer <= 1
