@@ -32,6 +32,7 @@ from scipy.interpolate import RegularGridInterpolator
 import metrics as metrics_mod
 from density import Landscape
 from trajectory import StateTrajectory
+from tuned_lens import EARLY_LAYER_CAVEAT, readout_name
 
 
 @dataclass
@@ -245,9 +246,11 @@ def explain(report: BasinReport, traj: StateTrajectory, quality=None) -> str:
 
     meaning = []
     if report.top_token is not None and report.readout_stable_from is not None:
+        lens = readout_name(traj.meta)
         meaning.append(
-            f"the logit-lens top-1 is `{report.top_token}` from layer "
+            f"the {lens} top-1 is `{report.top_token}` from layer "
             f"**{report.readout_stable_from}** onward"
+            + (f" ({EARLY_LAYER_CAVEAT})" if lens == "logit lens" else "")
         )
     if report.entropy is not None and len(report.entropy):
         meaning.append(

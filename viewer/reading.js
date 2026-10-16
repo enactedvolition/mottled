@@ -91,6 +91,9 @@
       projection: config.projection || null,
       density: config.density || null,
       seed: config.seed === undefined ? null : config.seed,
+      // a record without the field predates the tuned lens: every scene
+      // written before it read its layers through the raw logit lens
+      lens: config.lens || "logit",
       sae: record.sae ? { source: record.sae.source || null,
                           hook: record.sae.hook || null } : null,
     };
@@ -122,12 +125,22 @@
      "Nearest tokens are representation-space neighbors, not semantic ones. " +
      "The logit lens is a readout diagnostic — what the output head " +
      "would say if pointed at an intermediate state — not the model’s " +
-     "belief at that layer."],
+     "belief at that layer. The raw lens is also biased, most at early " +
+     "layers; a scene captured with --lens tuned reads each layer through " +
+     "a tuned lens, which corrects much of that and is still a readout."],
     ["What it does not show",
      "Mechanism. A scene generates hypotheses about representation geometry; " +
      "establishing a cause takes activation or path patching and held-out " +
      "prompts. docs/validity.md is the inferential contract."],
   ];
+
+  /** The inspector's name for a scene's readout, with the raw lens's
+   * caveat attached where a reader meets it rather than in a panel. */
+  function readoutLabel(scene) {
+    const p = provenanceSummary(scene);
+    if (p && p.lens !== "logit") return "tuned lens";
+    return "logit lens — biased at early layers";
+  }
 
   /** One sentence sizing the projection's trustworthiness, or null. */
   function fidelityNote(fidelity) {
@@ -148,5 +161,5 @@
   }
 
   return { LOW_FIDELITY, fidelitySummary, sceneFidelity, provenanceSummary,
-           sceneSummary, fidelityNote, uncertaintyNote, NOTES };
+           sceneSummary, fidelityNote, uncertaintyNote, readoutLabel, NOTES };
 });

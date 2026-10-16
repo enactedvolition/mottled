@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### A tuned lens, and a raw lens that says it is biased
+- **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
+  layer but the last through the published tuned lens for the model
+  (Belrose et al. 2023; GPT-2, Pythia-deduped, Llama-2/3, OPT) or through a
+  directory the `tuned-lens` package trained. On GPT-2 it brings layer 0's
+  readout from 40.5 to 4.7 nats of KL from the model's own output, and
+  layers 1–3 from 4.6–5.2 to 1.6–1.9. A lens for another depth or width is
+  refused, not truncated. Mottled applies lenses; it does not train them.
+- **Recorded.** Each trajectory's `meta["lens"]` and each run's entry in the
+  analysis record say which readout ran (a tuned lens adds its source, Space
+  commit and the base-model revision it was fitted against); the config's
+  `lens` reaches the scene through `capture | project`. Interventions and
+  their persistence controls run under the same lens as their baseline.
+- **Warned.** The viewer's inspector labels the top-k readout with its lens
+  ("logit lens — biased at early layers"), the explorer gains a *Readout
+  lens* selector and the same caption, and the basin prose names its lens.
+  `docs/validity.md` states the measured bias and what the tuned lens does
+  not fix.
+
 ### A command line that composes
 - **Stage commands that pipe.** `mottled capture` (prompts in, one trajectory
   `.mtj` container per prompt out), `mottled project` (a trajectory stream

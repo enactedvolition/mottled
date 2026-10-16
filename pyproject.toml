@@ -62,7 +62,7 @@ py-modules = ["attractor", "blast", "bvh", "cache", "capture", "cli", "codegen",
               "compare", "config", "convert_sae", "crossmodel", "density", "design_tokens",
               "dose", "intervene", "metrics", "mtjschema", "mweights", "neighbors", "parity",
               "pipeline", "projection", "provenance", "remote", "render", "sae",
-              "serve", "smoke", "statefile", "stream", "terrain", "trajectory",
+              "serve", "smoke", "statefile", "stream", "terrain", "trajectory", "tuned_lens",
               "ui"]
 # `viewer` ships as package data, not just as repo content: serve.py resolves
 # its static root next to itself, so without this a pip-installed `mottled

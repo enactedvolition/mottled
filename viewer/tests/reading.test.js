@@ -106,11 +106,27 @@ test("seed 0 survives, since 0 is a real seed", () => {
   assert.strictEqual(R.sceneSummary(scene({ analysis: record })).provenance.seed, 0);
 });
 
+test("a record without a lens predates the tuned lens: it was the raw lens", () => {
+  assert.strictEqual(R.sceneSummary(scene({ analysis: RECORD })).provenance.lens, "logit");
+  const tuned = { ...RECORD, config: { ...RECORD.config, lens: "tuned" } };
+  assert.strictEqual(R.sceneSummary(scene({ analysis: tuned })).provenance.lens, "tuned");
+});
+
+test("the inspector names the readout, and cautions the raw lens", () => {
+  assert.match(R.readoutLabel(scene({ analysis: RECORD })), /^logit lens .*early layers/);
+  // no record at all: every producer that writes none reads through the raw lens
+  assert.match(R.readoutLabel(scene()), /^logit lens .*early layers/);
+  // a lens directory is a tuned lens too
+  const dir = { ...RECORD, config: { ...RECORD.config, lens: "/lenses/qwen" } };
+  assert.strictEqual(R.readoutLabel(scene({ analysis: dir })), "tuned lens");
+});
+
 test("the notes keep docs/validity.md's vocabulary", () => {
   const text = R.NOTES.map(([h, b]) => h + " " + b).join(" ");
   assert.match(text, /state concentration region/);
   assert.match(text, /representation-space neighbors/);
   assert.match(text, /readout diagnostic/);
+  assert.match(text, /biased, most at early layers/);
   // and never claim the stronger thing
   assert.doesNotMatch(text, /\battractor\b/);
   assert.match(text, /does not show|not establish|Mechanism\./);
