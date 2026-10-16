@@ -36,7 +36,7 @@ remote = ["requests>=2.28", "safetensors>=0.4"]
 umap = ["umap-learn>=0.5"]
 faiss = ["faiss-cpu>=1.7"]
 # Ecosystem interop (optional): TransformerLens producer, SAELens conversion.
-tlens = ["transformer-lens>=1.14"]
+tlens = ["transformer-lens>=1.14,<4"]  # 4.0 removed HookedTransformer
 sae = ["sae-lens>=3.0"]
 # NNsight producer + the `mottled parity` cell that checks it. Optional and
 # not in requirements.txt: it pulls ~28 packages (ipython, socketio,
