@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Does a better lens predict what a patch does? (pre-registered)
+- **`experiments/patching.py`** overwrites the residual state at one site of
+  exact `input_ids` and returns the model's own final logits (not a lens),
+  clean and patched, with the state before and after and a provenance record
+  (resolved hub commit, dtype, ids, site, the written value's hash). A
+  self-patch is bit-identical; a revision that resolves to another commit is
+  refused. `experiments/` is not packaged, so none of this is public API.
+- **`experiments/lens_patch_predictiveness.py`** asks whether raw and tuned
+  lens readouts of a patched state anticipate the change in GPT-2's own
+  final log-odds, on 160 windows of 80 State of the Union excerpts
+  (`@stdlib/datasets-sotu@0.2.3`, public domain, committed with provenance).
+  Design, hypothesis, decision rules and sample size were committed in
+  `experiments/README.md` before any GPT-2 number from it existed. The run
+  fails unless the self-patch is exactly zero and the last-layer positive
+  control holds. Results pending; a null or reversed result will be
+  reported as prominently as a positive one.
+
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
   layer but the last through the published tuned lens for the model

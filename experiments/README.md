@@ -53,12 +53,14 @@ lens?
 ### Design
 
 **Model.** GPT-2 small, hub id `gpt2` (openai-community/gpt2), revision
-`607a30d783dfa663caf39e06633721c8d4cfcd7e`. *Assumption:* this is the commit
-PR #54 recorded for its cached GPT-2 run; it was not verifiable from the
-container this plan was written in (no hub access). The model and tokenizer
-are loaded at that revision and the run refuses, before any forward pass, if
-the resolved `config._commit_hash` differs. float32, CPU, eval mode,
-`torch.set_num_threads(4)` (recorded), `torch.use_deterministic_algorithms(True)`.
+`607a30d783dfa663caf39e06633721c8d4cfcd7e`. Registered as an assumption (the
+commit PR #54 recorded; the container this plan was written in had no hub
+access) and since confirmed: a GitHub Actions run loading `gpt2` logged that
+commit as resolved (Evidence run 38985813312, job 117256900327). The model
+and tokenizer are loaded at that revision and the run refuses, before any
+forward pass, if the resolved `config._commit_hash` differs. float32, CPU,
+eval mode, `torch.set_num_threads(4)` (recorded),
+`torch.use_deterministic_algorithms(True)`.
 
 **Tuned lens.** `tuned_lens.from_hub("gpt2")` from the AlignmentResearch/
 tuned-lens Space. Its commit is unknown offline, so `--lens-revision`
@@ -213,21 +215,54 @@ model and lens resolved revisions, corpus SHA-256, environment versions,
 threads), and one record per item (document id, split, window, exact token
 ids, site, partner, targets, and per layer and condition Δobs and Δpred
 raw/tuned). `--summary summary.json`: per-cell metrics, intervals, the H1
-verdicts, controls and provenance only — sorted keys, floats rounded to 6
-significant digits, no timestamps, so a rerun produces the same bytes.
+verdicts, controls, configuration, item counts and provenance, without the
+items — sorted keys, floats rounded to 6 significant digits, no timestamps,
+so a rerun produces the same bytes.
 SHA-256 of both files goes to stderr at the end.
 
 ### Deviations from the plan
 
-None at registration.
+None so far.
+
+### Notes after registration
+
+Facts established after the plan was committed. None of them changes the
+design above.
+
+- **Revision.** The pinned GPT-2 commit is what the hub serves for `gpt2`
+  (Evidence run 38985813312); see *Model*.
+- **Full-size dry run.** `main()` on a randomly initialised model with
+  GPT-2-small's exact shapes (12 × 768, vocabulary 50,257), 80 word-level
+  documents, a 12-translator synthetic lens, 4 threads and B = 2000: the same
+  6,400 forward passes and lens readouts as the real run. Measured here
+  (4-core Xeon @ 2.8 GHz, while other processes held the load average at
+  3.5–7): 724 s and 661 s for two runs (their own `timing`), 2.6–2.8 s per
+  item in steady stretches, about 8–9 min uncontended. For a 4-vCPU GitHub
+  runner that
+  suggests 8–17 min, still an estimate. Controls: self-patch max |Δlogit| = 0
+  over all 2,080 self-patches, positive-control max error 8.35e-07. The two
+  runs wrote byte-identical `summary.json` (20,525 bytes) and `results.json`
+  identical apart from `timing`. Its H1 table is meaningless (random
+  weights, random translators) and is not evidence about lenses.
 
 ### Running it
 
     pip install -r requirements.lock --extra-index-url https://download.pytorch.org/whl/cpu
     python -m experiments.lens_patch_predictiveness --out results.json --summary summary.json
+    cat summary.json
 
-Downloads GPT-2 and the tuned lens from the hub. Nothing beyond
-`requirements.lock` is needed (`huggingface_hub` arrives with transformers).
+From the repository root. Downloads GPT-2 and the tuned lens from the hub;
+nothing beyond `requirements.lock` is needed (`huggingface_hub` arrives with
+transformers). Status, the control values, the H1 table and both files'
+SHA-256 go to stderr; the exit code is 1 if a control failed. `--corpus`
+exists so the tests can point the run at a tiny corpus; the registered file
+is checked by SHA-256 and any other is a deviation. `main(argv, loaded=(model,
+tokenizer, lens))` runs everything but the download on models you pass:
+`tests/test_lens_patch_predictiveness.py` uses it with a tiny model and a
+lens of random translators (machinery only — its numbers mean nothing).
+`pytest -m network tests/test_patching.py` checks the self-patch identity and
+the last-layer control on real GPT-2 at the pinned revision in seconds, as a
+preflight for the full run.
 
 ## Corpus provenance
 
