@@ -274,9 +274,11 @@ def per_layer_preservation(hidden: np.ndarray, coords: np.ndarray, k: int = 5,
     searched among that layer's T states only, in hidden and projected space.
 
     This is the reading the pooled score is usually taken to give ("is the
-    local structure *at this depth* intact?"). On GPT-2 small the pooled score
-    cannot tell PCA from a random projection while this one can
-    (fidelity_experiment.py). k is clipped to T-1 per layer.
+    local structure *at this depth* intact?"). On GPT-2 small (8 prompts, 13
+    layers; measured for PR #49, commit 508e522) the pooled score ranks a
+    random projection above PCA (0.339 vs 0.318, chance 0.050) while this one
+    ranks them correctly (PCA 0.550, random 0.447, chance 0.345). k is clipped
+    to T-1 per layer.
     """
     hidden = np.asarray(hidden)
     coords = np.asarray(coords)
