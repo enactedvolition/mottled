@@ -15,6 +15,14 @@
   hidden-space measurements as bare numbers. Each line now says where it was
   measured — *projection*, *hidden space* or *readout* (`metrics.SPACE`) —
   and a caption says that the projection ones measure the picture.
+- **The density SE is no longer called a confidence field.** `density.py`,
+  the README, `docs/mtj-format.md` and the viewer README described the
+  bootstrap SE as the terrain's confidence, and `docs/validity.md` as useful
+  for spotting bandwidth artifacts. It is neither: it treats dependent states
+  as independent (on the bundled GPT-2 scenes it is about a fifth of a block
+  bootstrap over token trajectories) and resamples at a near-fixed bandwidth
+  (doubling the bandwidth moves the terrain by more than two SE in 95% of
+  cells). The wording now says lower bound, and says what it cannot show.
 
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every

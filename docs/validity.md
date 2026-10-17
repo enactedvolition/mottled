@@ -110,8 +110,13 @@ special regime of the model.
 resamples *individual states* with replacement. Because layer-token states
 within a run are highly dependent, that i.i.d. bootstrap understates
 uncertainty: it treats dependent observations as exchangeable, so
-`density_se` is a lower bound on the honest error, useful for spotting
-bandwidth artifacts but not for confidence statements about the model.
+`density_se` is a lower bound on the honest error, not a confidence
+statement about the model. On the bundled GPT-2 scenes it is about a fifth
+of a block bootstrap over token trajectories, and repeating states shrinks it
+though they add no information. Nor does it cover the bandwidth: every
+resample has the same size, so Scott's rule picks nearly the same bandwidth,
+and doubling that bandwidth moves the terrain by more than two SE in almost
+every cell. Low SE does not mean the shape is robust to the estimator.
 The honest upgrades, in order of strength:
 
 - **Block bootstrap** over prompts, token trajectories, or contiguous layer

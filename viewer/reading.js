@@ -156,8 +156,8 @@
     return hasUncertainty
       ? "This scene carries a bootstrap standard error for the density. It is " +
         "a lower bound: the bootstrap treats dependent states as independent."
-      : "This scene carries no density uncertainty, so the terrain shows no " +
-        "confidence at all — read its shape as suggestive.";
+      : "This scene carries no density uncertainty, so nothing on the terrain " +
+        "marks where its shape is unstable — read it as suggestive.";
   }
 
   return { LOW_FIDELITY, fidelitySummary, sceneFidelity, provenanceSummary,

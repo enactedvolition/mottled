@@ -40,8 +40,10 @@ terrain and draped trajectory points; raw trajectories don't).
 
 The uncertainty controls surface two honesty signals the format now carries.
 The **uncertainty toggle** washes the terrain toward amber where the density
-estimate is least stable across bootstrap resamples — the height there is
-bandwidth artifact more than measurement. The inspector's **nbhd preserved**
+estimate is least stable across bootstrap resamples. That is a lower bound,
+not a confidence statement: the bootstrap treats dependent states as
+independent and holds the bandwidth fixed, so terrain that stays its own
+colour is not thereby confirmed. The inspector's **nbhd preserved**
 line reports how much of a state's hidden-space neighborhood survived the 2-D
 projection at the point you hover: a low percentage means the flattened
 position is not to be trusted.

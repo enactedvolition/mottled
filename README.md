@@ -8,11 +8,11 @@ and pile up as a prompt moves through its layers.**
 
 Every 2-D picture of a residual stream is a lie of some size. Mottled's pitch
 is that it *measures the size of the lie* and prints it on the picture:
-per-state neighborhood preservation, a bootstrap confidence field on the
-terrain, and an amber ✕ on every state whose local structure did not survive
-the flattening. It is an instrument for *generating* hypotheses about
-representation geometry, not for establishing mechanism. The inferential
-contract is [`docs/validity.md`](docs/validity.md).
+per-state neighborhood preservation, a bootstrap standard-error field on the
+terrain (a lower bound), and an amber ✕ on every state whose local structure
+did not survive the flattening. It is an instrument for *generating*
+hypotheses about representation geometry, not for establishing mechanism. The
+inferential contract is [`docs/validity.md`](docs/validity.md).
 
 ![The web viewer scrubbing three GPT-2 runs from layer 0 to layer 12 across
 one density terrain](docs/images/viewer-scrub.gif)

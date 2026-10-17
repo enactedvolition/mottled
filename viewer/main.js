@@ -253,9 +253,9 @@ function buildTerrain(t) {
     const k = iso < 0.06 ? 0.82 : 1.0;
     col.set([shade[0] * k, shade[1] * k, shade[2] * k], v * 3);
     // uncertainty shading: blend the base colour toward SE_COLOR by the
-    // cell's relative bootstrap standard error (confident cells unchanged)
+    // cell's relative bootstrap standard error (lowest-SE cells unchanged)
     const u = se ? Math.min(1, se[v] / seMax) : 0;
-    const um = 0.15 + 0.85 * u; // keep a floor so confident terrain reads too
+    const um = 0.15 + 0.85 * u; // keep a floor so low-SE terrain reads too
     seCol.set([shade[0] * k * (1 - um) + SE_COLOR[0] * um,
                shade[1] * k * (1 - um) + SE_COLOR[1] * um,
                shade[2] * k * (1 - um) + SE_COLOR[2] * um], v * 3);
@@ -969,7 +969,7 @@ function buildUI(scene) {
   ui.attnToggle.checked = state.showAttention = false;
 
   // Uncertainty defaults ON when the scene carries a standard-error field:
-  // the confidence of the terrain should be visible before the viewer trusts
+  // the terrain's instability should be visible before the viewer trusts
   // its shape, not something a user has to opt into.
   const hasSE = !!(scene.terrain && scene.terrain.se);
   ui.uncertaintyRow.hidden = !hasSE;

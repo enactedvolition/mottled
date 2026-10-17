@@ -178,8 +178,9 @@ Fields:
   - `density` — `(H, W)` float32 *(optional)*: the normalised `[0, 1]`
     density field the height map was built from.
   - `se` — `(H, W)` float32 *(optional)*: the per-cell bootstrap standard
-    error of that density, in the same normalised units — the confidence
-    field. Present only when the producer ran the density bootstrap.
+    error of that density, in the same normalised units — a lower bound on
+    its error, not a confidence statement (`docs/validity.md`). Present only
+    when the producer ran the density bootstrap.
 - `runs`: list of runs drawn on that terrain. Each run:
   - `label`: display name (`"A"`, `"B"`, …),
   - `prompt`: the prompt text,
