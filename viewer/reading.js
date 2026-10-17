@@ -9,7 +9,8 @@
  * research-validity risk docs/validity.md exists to name.
  *
  * Everything here is derived from what the scene file already carries: per-run
- * neighborhood preservation, the density standard-error field, and the
+ * neighborhood preservation (within-layer where the scene has it, pooled
+ * across layers where it does not), the density standard-error field, and the
  * analysis record (provenance.py) that `.mtj` has carried since the manifest
  * work. Nothing is recomputed and nothing is assumed — a scene that lacks a
  * layer says so rather than showing a blank.
@@ -29,9 +30,18 @@
   // conformance test; the explorer's ✕ markers use the same cut.
   const LOW_FIDELITY = 0.5;
 
+  // projection.low_fidelity_cut: LOW_FIDELITY of the way from what a random
+  // placement keeps (`chance`) to 1. Same operations in the same order, so
+  // both sides compute the same double.
+  function lowFidelityCut(chance, lowFidelity) {
+    const lf = lowFidelity === undefined ? LOW_FIDELITY : lowFidelity;
+    const c = chance == null ? 0 : chance;
+    return c + lf * (1 - c);
+  }
+
   /** Mean preservation and the share of states the projection may have moved. */
-  function fidelitySummary(preservation, lowFidelity) {
-    const cut = lowFidelity === undefined ? LOW_FIDELITY : lowFidelity;
+  function fidelitySummary(preservation, lowFidelity, chance) {
+    const cut = lowFidelityCut(chance, lowFidelity);
     const values = preservation && preservation.data ? preservation.data : preservation;
     if (!values || values.length === 0)
       throw new Error("no preservation values to summarize");
@@ -44,24 +54,51 @@
       mean: sum / values.length,
       low_fraction: low / values.length,
       low_fidelity: cut,
+      chance: chance == null ? 0 : chance,
       n: values.length,
     };
   }
 
   /** Fidelity across every run that carries it — the scene-level headline.
    *
+   * Each run is read through what the explorer's ✕ flag reads
+   * (projection.fidelity_basis): its within-layer score, against that run's
+   * own chance level, when the scene carries one; otherwise `quality` with
+   * the plain cut. For a scene written before within-layer scores, or a run
+   * too short for one, `quality` pools neighbors across layers, and on GPT-2
+   * cannot tell PCA from a random projection — `metric` says which was read.
+   *
    * Runs are pooled rather than averaged over per-run means: the runs in a
    * scene can have different token counts, and a mean of means would quietly
    * weight a three-token prompt like a thirty-token one. */
   function sceneFidelity(runs) {
-    const pooled = [];
+    let sum = 0, low = 0, n = 0;
+    const metrics = new Set(), cuts = [], chances = [];
     for (const run of runs || []) {
-      const q = run && run.quality;
+      const lf = run && run.layerFidelity;
+      const q = lf ? lf.preservation : run && run.quality;
       const values = q && q.data ? q.data : null;
-      if (!values) continue;
-      for (let i = 0; i < values.length; i++) pooled.push(values[i]);
+      if (!values || !values.length) continue;
+      const cut = lowFidelityCut(lf ? lf.chance : 0);
+      for (let i = 0; i < values.length; i++) {
+        sum += values[i];
+        if (values[i] < cut) low++;
+      }
+      n += values.length;
+      metrics.add(lf ? "within-layer" : "pooled");
+      cuts.push(cut);
+      if (lf && lf.chance != null) chances.push(lf.chance);
     }
-    return pooled.length ? fidelitySummary(pooled) : null;
+    if (!n) return null;
+    return {
+      mean: sum / n,
+      low_fraction: low / n,
+      n,
+      metric: metrics.size === 1 ? [...metrics][0] : "mixed",
+      // a range, because each run is cut against its own chance level
+      low_fidelity: [Math.min(...cuts), Math.max(...cuts)],
+      chance: chances.length ? [Math.min(...chances), Math.max(...chances)] : null,
+    };
   }
 
   /** The provenance lines, from the analysis record the .mtj carries. */
@@ -142,14 +179,34 @@
     return "logit lens — biased at early layers";
   }
 
-  /** One sentence sizing the projection's trustworthiness, or null. */
+  // 0.5, or 0.61–0.67 when the runs of a scene were cut at different levels
+  const span = (r) => {
+    const [a, b] = Array.isArray(r) ? r : [r, r];
+    const f = (x) => String(Number(x.toFixed(2)));
+    return a === b ? f(a) : `${f(a)}–${f(b)}`;
+  };
+
+  /** One sentence sizing the projection's trustworthiness, naming the
+   * measure it read, or null. */
   function fidelityNote(fidelity) {
     if (!fidelity) return null;
     const pct = (fidelity.low_fraction * 100).toFixed(0);
     const mean = fidelity.mean.toFixed(2);
-    return `Mean neighborhood preservation ${mean}. ${pct}% of states are ` +
-      `low-fidelity (below ${fidelity.low_fidelity}) — drawn where the ` +
-      `projection could put them, not where they truly are.`;
+    let what = `Mean neighborhood preservation ${mean}.`;
+    if (fidelity.metric === "within-layer")
+      what = `Mean within-layer neighborhood preservation ${mean}` +
+        (fidelity.chance ? `; a random placement keeps ${span(fidelity.chance)}.` : ".");
+    else if (fidelity.metric === "pooled")
+      what = `Mean neighborhood preservation ${mean}, pooled across layers: this ` +
+        `scene carries no within-layer score (it predates them, or its prompts ` +
+        `are too short for one). The pooled score mixes in neighbors from ` +
+        `other layers, and on GPT-2 it cannot tell PCA from a random projection.`;
+    else if (fidelity.metric === "mixed")
+      what = `Mean neighborhood preservation ${mean}: within each layer for runs ` +
+        `long enough to have the score, pooled across layers for the rest.`;
+    return `${what} ${pct}% of states are low-fidelity (below ` +
+      `${span(fidelity.low_fidelity)}) — drawn where the projection could put ` +
+      `them, not where they truly are.`;
   }
 
   function uncertaintyNote(hasUncertainty) {
@@ -160,6 +217,6 @@
         "marks where its shape is unstable — read it as suggestive.";
   }
 
-  return { LOW_FIDELITY, fidelitySummary, sceneFidelity, provenanceSummary,
+  return { LOW_FIDELITY, lowFidelityCut, fidelitySummary, sceneFidelity, provenanceSummary,
            sceneSummary, fidelityNote, uncertaintyNote, readoutLabel, NOTES };
 });

@@ -818,12 +818,15 @@ function setPickInfo(pick, pinned) {
               (extrap ? `<span class="dim"> (extrapolation)</span>` : "") + `</div>`;
     }
   }
-  if (run.quality) {
-    const [Lq, Tq] = run.quality.shape;
+  // the same measure the reading panel's fidelity line reads
+  const q = run.layerFidelity ? run.layerFidelity.preservation : run.quality;
+  if (q) {
+    const [Lq, Tq] = q.shape;
     if (pick.layer < Lq && tok < Tq) {
-      const pres = run.quality.data[pick.layer * Tq + tok];
+      const pres = q.data[pick.layer * Tq + tok];
       html += `<div>nbhd preserved <b>${(pres * 100).toFixed(0)}%</b>` +
-              `<span class="dim"> (2-D fidelity)</span></div>`;
+              `<span class="dim"> (2-D fidelity, ` +
+              `${run.layerFidelity ? "within layer" : "pooled across layers"})</span></div>`;
     }
   }
   if (run.topk && run.topk[pick.layer] && run.topk[pick.layer][tok]) {
@@ -1074,8 +1077,11 @@ function applyBlastLayout() {
   for (let i = 0, n = q.length / 2; i < n; i++) {
     p[i * 3] = q[i * 2]; p[i * 3 + 1] = q[i * 2 + 1];
   }
-  // the inspector's nbhd line and the reading panel's fidelity are this layout's
+  // the inspector's nbhd line and the reading panel's fidelity are this
+  // layout's. A blast layout's quality is already scored within each layer
+  // (blast._quality), against the plain cut as before: no chance level.
   run.quality = lay.quality;
+  run.layerFidelity = lay.quality ? { preservation: lay.quality, k: null, chance: null } : null;
   state.blast.colour = MTJ.blastColourLabel(state.scene.blast, lay,
                                             state.blast.chosen, state.blast.colour);
 }

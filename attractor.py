@@ -31,6 +31,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 import metrics as metrics_mod
 from density import Landscape
+from projection import fidelity_basis, low_fidelity_cut
 from trajectory import StateTrajectory
 from tuned_lens import EARLY_LAYER_CAVEAT, readout_name
 
@@ -157,9 +158,12 @@ def _fidelity_clause(report: BasinReport, quality) -> str:
     lost their hidden-space neighborhoods on the way down, its shape is an
     artifact of the flattening, not structure in the model. This turns
     `projection_quality` into prose so the explanation never oversells the
-    picture — the exact failure mode the tool is most at risk of.
+    picture — the exact failure mode the tool is most at risk of. It reads
+    what the ✕ markers read (`projection.fidelity_basis`), so the prose and
+    the scene cannot disagree about the same states.
     """
-    pres = np.asarray(quality.preservation)
+    basis = fidelity_basis(quality)
+    pres = basis.values
     if report.n_members:
         m = report.members
         basin_pres = float(pres[m[:, 0], m[:, 1]].mean())
@@ -168,14 +172,18 @@ def _fidelity_clause(report: BasinReport, quality) -> str:
 
     ev = quality.explained_variance
     var_phrase = f"keeps **{ev:.0%}** of the variance globally and " if ev is not None else ""
+    within = basis.metric == "within-layer"
     lead = (f"**How much to trust this** — the projection {var_phrase}the states "
             f"that make up this basin retain **{basin_pres:.0%}** of their "
-            f"hidden-space nearest neighbors (k={quality.k}) on average. ")
-    if basin_pres < 0.5:
+            f"{'within-layer ' if within else ''}hidden-space nearest neighbors "
+            f"(k={basis.k}) on average"
+            + (f", where a random placement would keep {basis.chance:.0%}. " if within
+               else ", pooled across layers. "))
+    if basin_pres < low_fidelity_cut(basis.chance):
         tail = ("That is low: read the basin's *shape* as suggestive, not "
                 "established — much of the local structure did not survive the "
                 "flattening.")
-    elif basin_pres < 0.8:
+    elif basin_pres < low_fidelity_cut(basis.chance, 0.8):
         tail = ("That is moderate: the basin's broad location is meaningful, its "
                 "fine structure less so.")
     else:

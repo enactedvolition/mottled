@@ -3,6 +3,31 @@
 ## Unreleased
 
 ### Review fixes: what the trust signals measure, and what metrics are called
+- **The low-fidelity flag reads within-layer preservation.** The amber ✕
+  markers, the explorer's fidelity header, the basin's trust sentence, and
+  the viewer's reading panel and inspector all read neighborhood
+  preservation pooled across layers, which mixes in cross-layer neighbors:
+  on GPT-2 it ranks a random projection above PCA. They now read
+  within-layer preservation, the worse of euclidean and cosine
+  (`projection.fidelity_basis`), and name the measure they read. A run of
+  six tokens or fewer, where the within-layer score is 1.0 for any
+  projection, falls back to the pooled score and says so. The explorer's
+  "Neighborhood preservation per layer" chart, which plotted the pooled
+  score, now plots what the flag reads and is labelled with it.
+- **The cut is measured from chance.** `LOW_FIDELITY = 0.5` now means
+  halfway from what a random placement keeps (k / (n − 1)) to keeping every
+  neighbor (`projection.low_fidelity_cut`), which is the plain 0.5 when
+  chance is near 0. Within a layer of T tokens chance is 5 / (T − 1), at or
+  above 0.5 for prompts of 11 tokens or fewer, where the plain cut could
+  not flag even a projection with every layer shuffled (tiny model, 7
+  tokens: 0% flagged under the plain cut, 89% under this one). Expect more
+  states to be flagged than before.
+- **`.mtj`: `runs[].layer_fidelity`** (additive, no version bump):
+  `{ "preservation" → (L, T), "k", "chance" }`, written when a run has the
+  within-layer score. `quality` keeps its meaning. The viewer prefers
+  `layer_fidelity` and falls back to `quality`, so the bundled samples,
+  written before it, report the same numbers as before, now labelled
+  "pooled across layers".
 - **Renamed:** `metrics.semantic_drift` is now `metrics.layer_cosine_drift`,
   and the research-metrics key `avg_semantic_drift` is now
   `avg_layer_cosine_drift` (the explorer's label follows). It is the cosine

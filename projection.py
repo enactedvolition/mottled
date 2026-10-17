@@ -14,6 +14,7 @@ picture is trustworthy and where it is not.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -241,29 +242,52 @@ def neighborhood_preservation(X: np.ndarray, Y: np.ndarray, k: int = 10,
     return out
 
 
-# Below this neighborhood-preservation score a state is drawn where the
-# projection *could* put it rather than where it is. One home for the
-# threshold: it drives the explorer's prose, the ✕ markers on the scene, and
-# the viewer's scene panel, which would otherwise disagree about the same run.
+# Below this a state is drawn where the projection *could* put it rather than
+# where it is. One home for the threshold: it drives the explorer's prose, the
+# ✕ markers on the scene, and the viewer's scene panel, which would otherwise
+# disagree about the same run.
+#
+# Derivation: the fraction of the way from what a random placement keeps
+# (chance = k / (n - 1)) to keeping every neighbor. A state is low-fidelity
+# when it keeps less than half of that way (`low_fidelity_cut`), which is the
+# plain 0.5 cut when chance is near 0. The within-layer score needs the
+# correction: with k = 5 of T tokens its chance is 5 / (T - 1), at or above
+# 0.5 for every prompt of 11 tokens or fewer, so a plain 0.5 cut could not
+# flag a projection that kept no within-layer structure at all. Measured on
+# the tiny test model at 7 tokens: PCA's points shuffled within each layer
+# were flagged 0% under the plain cut and 89% (78-97%) under this one; at 13
+# tokens it flags PCA 57%, random projections 88%, the shuffle 96%
+# (tests/test_projection.py pins both). No measurement here argues for a
+# fraction other than one half; it is a convention, now with a fixed meaning.
 LOW_FIDELITY = 0.5
 
 
-def fidelity_summary(preservation, low_fidelity: float = LOW_FIDELITY) -> dict:
+def low_fidelity_cut(chance: float = 0.0, low_fidelity: float = LOW_FIDELITY) -> float:
+    """The preservation below which a state is flagged: `low_fidelity` of the
+    way from a random placement's expected score (`chance`) to 1."""
+    return chance + low_fidelity * (1.0 - chance)
+
+
+def fidelity_summary(preservation, low_fidelity: float = LOW_FIDELITY,
+                     chance: float = 0.0) -> dict:
     """How much of the neighborhood structure survived the projection.
 
     One computation, two surfaces: the Streamlit explorer's inline note and
     the web viewer's scene panel (`viewer/reading.js`, pinned by
     `tests/test_reading_conformance.py`). A scene that reports one fidelity in
     the app and another in the browser is two tools, and a screenshot from
-    either says nothing about the other.
+    either says nothing about the other. `low_fidelity` in the result is the
+    cut actually applied (`low_fidelity_cut`).
     """
     arr = np.asarray(preservation, dtype=np.float64).ravel()
     if arr.size == 0:
         raise ValueError("no preservation values to summarize")
+    cut = low_fidelity_cut(chance, low_fidelity)
     return {
         "mean": float(arr.mean()),
-        "low_fraction": float((arr < low_fidelity).mean()),
-        "low_fidelity": float(low_fidelity),
+        "low_fraction": float((arr < cut).mean()),
+        "low_fidelity": float(cut),
+        "chance": float(chance),
         "n": int(arr.size),
     }
 
@@ -295,6 +319,42 @@ def preservation_chance(n: int, k: int) -> float:
     the other n-1 points: k / (n - 1)."""
     k = int(min(k, n - 1))
     return 1.0 if k < 1 else k / (n - 1)
+
+
+class FidelityBasis(NamedTuple):
+    """The per-state preservation the low-fidelity flag reads, and what it is."""
+
+    values: np.ndarray      # (L, T)
+    metric: str             # "within-layer" | "pooled"
+    k: int | None
+    chance: float           # what a random placement keeps; 0.0 for pooled (see below)
+
+
+def fidelity_basis(quality) -> FidelityBasis:
+    """What the trust signal reads: within-layer preservation, the worse of
+    euclidean and cosine, wherever it can discriminate; the pooled score only
+    where it cannot.
+
+    The pooled score mixes in cross-layer neighbors, so on GPT-2 it ranks a
+    random projection above PCA (`per_layer_preservation`): flags driven by it
+    err toward trusting a scrambled picture. The worse of the two metrics,
+    because a state whose neighbors survive by one and not the other has not
+    kept its neighborhood. The within-layer score cannot discriminate when a
+    layer has fewer than k + 2 states: k clips to T - 1, every other state is
+    a neighbor, and any projection scores 1.0 (chance is 1). There, and when
+    it was not computed, the pooled score stands in, with the plain cut
+    (chance 0) it has always had — all an older scene, which carries no k,
+    lets the viewer apply either.
+    """
+    per_layer = getattr(quality, "per_layer", None)
+    chance = getattr(quality, "chance_layer", None)
+    if per_layer is not None and chance is not None and chance < 1.0:
+        cosine = getattr(quality, "per_layer_cosine", None)
+        values = per_layer if cosine is None else np.minimum(per_layer, cosine)
+        return FidelityBasis(np.asarray(values), "within-layer",
+                             int(quality.k_layer), float(chance))
+    return FidelityBasis(np.asarray(quality.preservation), "pooled",
+                         getattr(quality, "k", None), 0.0)
 
 
 def projection_quality(

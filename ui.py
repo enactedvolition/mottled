@@ -562,11 +562,23 @@ def main() -> None:
         if quality is not None:
             ev = (f"keeps **{quality.explained_variance:.0%}** of the variance · "
                   if quality.explained_variance is not None else "")
-            fidelity = projection_mod.fidelity_summary(quality.preservation)
+            basis = projection_mod.fidelity_basis(quality)
+            fidelity = projection_mod.fidelity_summary(basis.values, chance=basis.chance)
+            if basis.metric == "within-layer":
+                measure = (f"mean within-layer neighborhood preservation "
+                           f"**{fidelity['mean']:.2f}** (k={basis.k}, worse of "
+                           f"euclidean and cosine; a random placement keeps "
+                           f"{basis.chance:.2f}). ")
+            else:
+                measure = (f"mean neighborhood preservation, pooled across layers, "
+                           f"**{fidelity['mean']:.2f}** (k={basis.k}) — too few "
+                           f"tokens for a within-layer score. The pooled one mixes "
+                           f"in neighbors from other layers, and on GPT-2 it "
+                           f"cannot tell PCA from a random projection. ")
             st.markdown(
-                f"**Projection fidelity** — {ev}mean neighborhood preservation "
-                f"**{fidelity['mean']:.2f}** (k={quality.k}). "
-                f"**{fidelity['low_fraction']:.0%}** of states are low-fidelity — "
+                f"**Projection fidelity** — {ev}{measure}"
+                f"**{fidelity['low_fraction']:.0%}** of states are low-fidelity "
+                f"(below {fidelity['low_fidelity']:.2f}) — "
                 f"flagged ✕ on the scene and drawn where the projection *could* "
                 f"put them, not where they truly are.")
         gen0 = traj.meta.get("generation")
@@ -759,14 +771,23 @@ def main() -> None:
                 if q.explained_variance is not None:
                     st.write(f"projection keeps **{q.explained_variance:.0%}** "
                              "of hidden-space variance")
-                st.write(f"neighborhood preservation (k={q.k}): "
+                basis = projection_mod.fidelity_basis(q)
+                if basis.metric == "within-layer":
+                    st.write(f"within-layer neighborhood preservation (k={basis.k}, "
+                             f"worse of euclidean and cosine; chance "
+                             f"{basis.chance:.2f}): mean **{basis.values.mean():.2f}** · "
+                             f"this state **{basis.values[layer, token]:.2f}** — "
+                             "what the ✕ flag reads")
+                st.write(f"pooled across layers (k={q.k}): "
                          f"mean **{q.preservation.mean():.2f}** · "
-                         f"this state **{q.preservation[layer, token]:.2f}**")
+                         f"this state **{q.preservation[layer, token]:.2f}** — "
+                         "mixes in neighbors from other layers")
                 if q.residual is not None:
                     st.write(f"this state lies **{q.residual[layer, token]:.0%}** "
                              "off the projection plane")
-                st.markdown("**Neighborhood preservation per layer** *(this token)*")
-                st.line_chart({"preservation": q.preservation[:, token]})
+                st.markdown(f"**{basis.metric.capitalize()} neighborhood preservation, "
+                            "by layer** *(this token)*")
+                st.line_chart({"preservation": basis.values[:, token]})
             se = result["landscape"].density_se
             if se is not None:
                 st.write(f"density bootstrap SE: mean **{se.mean():.3f}** · "

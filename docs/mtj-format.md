@@ -86,7 +86,8 @@ a manifest looks like but not whether the bytes agree with it, so
 `mottled validate` also checks: the header and magic, strict JSON, 16-byte
 alignment of every array, `length = product(shape) × item size`, every
 array lying inside the blob, every array reference resolving, the shapes
-agreeing (`tokens` vs `T`, `entropy` / `quality` as `(L, T)`), and finite
+agreeing (`tokens` vs `T`; `entropy`, `quality` and `layer_fidelity` as
+`(L, T)`), and finite
 hidden states. Any language can write `.mtj`; `mottled validate FILE` is the
 conformance check.
 
@@ -192,9 +193,22 @@ Fields:
     - `entropy` — `(L, T)` float32 *(optional)*,
     - `quality` — `(L, T)` float32 *(optional)*: per-state projection
       fidelity — the fraction of each state's hidden-space nearest
-      neighbors preserved in the 2-D projection (`1.0` = local structure
-      intact). Tells a viewer where the flattened picture is trustworthy.
+      neighbors (k = 10, searched across all layers at once; a `blast`
+      scene's is per layer, below) preserved in the 2-D projection (`1.0` =
+      local structure intact). Pooled across layers it mixes in neighbors
+      from other layers, and on GPT-2 it ranks a random projection above
+      PCA; a reader should prefer `layer_fidelity` when present.
     - `attention` — `(L-1, T, T)` float32 *(optional)*,
+  - `layer_fidelity` *(optional)*: what the low-fidelity flag reads
+    (`projection.fidelity_basis`): `{ "preservation" → `(L, T)` float32
+    array ref, "k", "chance" }`. The preservation is searched within each
+    layer — the fraction of a state's k nearest same-layer neighbors kept,
+    the worse of euclidean and cosine neighbors in hidden space — and
+    `chance = k / (T - 1)` is what a random placement keeps on average. A
+    state is low-fidelity below `chance + 0.5 × (1 − chance)`. Absent when
+    the run has `T ≤ k + 1` tokens (every other state is then a neighbor and
+    any projection scores 1), and in scenes written before it; a reader
+    then falls back to `quality` with the plain `0.5` cut.
   - `topk` *(optional)*: `[L][T][k]` list of `[token, probability]` pairs.
   - `generation` *(optional)*: the decode record when the run covers
     prompt + generated continuation: `{ "prompt_tokens", "new_tokens",
