@@ -7,8 +7,8 @@ description: How to drive a Mottled pull request from open to merged — when to
 
 The maintainer works through Claude sessions and does not review line by
 line. A PR you open or are asked to drive is yours to get **merged**, not
-just green: nobody else will. Be proactive on everything inside the repo;
-stop and ask before anything that reaches outside it.
+just green: nobody else will. Be proactive, including on releases, which
+are gated on evidence rather than on asking (see "Outward actions").
 
 ## Working style (the maintainer's standing preferences)
 
@@ -42,18 +42,39 @@ Hold only for one of these, and say which in one line on the PR:
 - CI is red and you cannot explain why, or a test is flaky.
 - There is a merge conflict where both sides changed the same logic.
 - A human review was explicitly requested and is still pending.
-- The change reaches outside the repo (next section).
+- It is the release PR and its checklist is not all PASSED (next section).
+- A release is between its merge and its tag. `main` stays frozen until
+  the tag is pushed.
 
-## Never without the maintainer's yes, given in this session
+## Outward actions: yours to take, behind their gates
 
-- Pushing a tag. A `v*` tag publishes to PyPI through `publish.yml`.
-- Dispatching `publish.yml`, even as a dry run. It is tag-guarded, but it
-  is the release workflow and the maintainer decides when it runs.
-- Creating a GitHub release, or changing repository settings or secrets.
-- Merging the release PR. The release checklist on it decides that, not
-  green CI.
+The maintainer has handed these over too: don't ask first. Each one waits
+on evidence instead of on a yes.
 
-Dispatching `evidence.yml` or re-running CI is fine.
+- **Dispatching workflows.** Dispatch `evidence.yml`, re-run CI, and
+  dispatch `publish.yml` as a dry run on the release candidate's branch
+  whenever that branch changes. Off a tag, the publish job is skipped:
+  `if: startsWith(github.ref, 'refs/tags/')`.
+- **Merging the release PR.** Squash-merge it only when its evidence
+  checklist has a PASSED row, with a run URL or saved output, for every
+  gate RELEASING.md requires. Prove the gates covered the merged tree:
+  `git diff <gated commit> <squash commit>` must touch nothing but
+  `CHANGELOG.md`. Merges to `main` wait until the tag is pushed.
+- **Pushing the tag.** Tag the release PR's squash commit, never a later
+  HEAD, and push it in the same sitting. A `v*` tag publishes to PyPI, and
+  a version number can never be uploaded again. So a failed or unrun gate
+  means no tag, not a retry under the same number. If `publish.yml` fails
+  after the tag, bump the patch version for the next attempt.
+- **The GitHub release.** Create it from the tag. The notes are the
+  changelog block plus the parity table, as RELEASING.md asks. Then run
+  its after-tagging checks and report what they showed.
+- **Repository settings and secrets.** Change only what the task in hand
+  needs. Record what changed and why in the PR, or in an issue comment if
+  there is no PR.
+
+A gate that needs a person still needs one: the WebGPU check
+(`viewer/tests/parity.html` on a GPU) has no runner. Until the maintainer
+reports it, the release stays open. Say so once, then move on.
 
 ## Before every push
 
