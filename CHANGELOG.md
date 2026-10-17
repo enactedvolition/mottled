@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Does a better lens predict what a patch does? (pre-registered)
+- **`experiments/patching.py`** overwrites the residual state at one site of
+  exact `input_ids` and returns the model's own final logits (not a lens),
+  clean and patched, with the state before and after and a provenance record
+  (resolved hub commit, dtype, ids, site, the written value's hash). A
+  self-patch is bit-identical; a revision that resolves to another commit is
+  refused. `experiments/` is not packaged, so none of this is public API.
+- **`experiments/lens_patch_predictiveness.py`** asks whether raw and tuned
+  lens readouts of a patched state anticipate the change in GPT-2's own
+  final log-odds, on 160 windows of 80 State of the Union excerpts
+  (`@stdlib/datasets-sotu@0.2.3`, public domain, committed with provenance).
+  Design, hypothesis, decision rules and sample size were committed in
+  `experiments/README.md` before any GPT-2 number from it existed. The run
+  fails unless the self-patch is exactly zero and the last-layer positive
+  control holds.
+- **Result (Evidence run 39001132978, controls passed).** The registered
+  hypothesis holds pooled over layers 1–11: ρ_tuned − ρ_raw = +0.124
+  [+0.056, +0.204]. It holds at 8 of 11 layers and is not distinguishable at
+  2, 3 and 11. The tuned lens also predicts the scale (calibration slope
+  0.75–1.03 against the raw lens's 0.13–0.52). It does **not** carry over to
+  norm-matched random patches: there neither lens predicts much, and for the
+  donor-token target the tuned lens ranks worse at layers 0, 1 and 11. The
+  summary is committed byte-identical to the run's output, and
+  `experiments/README.md` has the table and caveats.
+
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
   layer but the last through the published tuned lens for the model
@@ -67,6 +92,37 @@
   markup unescaped, a stored XSS via `?file=`; all are escaped, every scene value in markup is
   checked by a test, and `index.html` carries a Content-Security-Policy
   (`script-src 'self'`).
+- **Analysis verbs.** `mottled compare`, `sae` (fit report and top
+  features), `intervene` (divergence and effect against a norm-matched
+  random control; `-o` writes the scene) and `dose` (a `DoseSweep`) wrap
+  existing library calls and print JSON. `mottled arrays --format
+  npz|safetensors` exports a `.mtj`'s arrays, manifest included, for numpy,
+  torch or a notebook.
+- **Behaviour change:** bare `mottled` prints help instead of launching the
+  explorer, which is now `mottled ui` (`mottled app` still works and warns).
+- **Repair.** A steer applied at every position is scored as the mean shift
+  over all steered positions (`score_against_control(token=None)`), not the
+  last position's alone. MoE routing indices for interleaved stacks come
+  from the config (`decoder_sparse_step`, `mlp_only_layers`,
+  `first_k_dense_replace`/`moe_layer_freq`, `interleave_moe_layer_step`)
+  instead of being assumed to be the last n blocks.
+
+### Per-layer neighborhood preservation
+- Projection quality gains `per_layer` (k-NN preservation within each
+  layer, in both spaces), a cosine variant and `chance_layer`, its
+  expectation under random placement. The pooled score mostly measures
+  layer separation: on GPT-2 (8 prompts × 13 layers, as reported in #49) it
+  ranked a random projection above PCA (0.339 vs 0.318), while per layer
+  PCA leads (0.550 vs 0.447). The fields are optional, so existing callers
+  and `.mtj` files are unchanged.
+
+### The parity matrix runs clean
+- The `tlens` extra is capped at `transformer-lens>=1.14,<4`: 4.0 removed
+  `HookedTransformer`, so the unbounded extra installed a version Mottled
+  cannot import. `mottled parity`'s TransformerLens row loads GPT-2 without
+  TL's prepended BOS (HF prepends none, so the two sides compared different
+  token sequences), and its NNsight row gives a tokenizer with no pad token
+  the EOS token, since NNsight pads.
 
 ### The shotgun blast: one pellet per prompt
 - **`blast.py`** draws many prompts as one family: each prompt is one pellet,
