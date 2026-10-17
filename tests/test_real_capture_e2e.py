@@ -44,9 +44,12 @@ more than a flip (a rotation, i.e. near-equal leading eigenvalues). That is
 reported, not aligned away.
 
 The offline tests below prove the logic on the tiny model from tests/tiny.py.
-The `network` tests run it on real GPT-2:
+The `network` test runs it on real GPT-2:
 
     python -m pytest -m network tests/test_real_capture_e2e.py -v -rsP
+
+The bundled samples predate the analysis record, so none of them can be
+re-run this way. Covering one means re-exporting it with a record.
 """
 from __future__ import annotations
 
@@ -65,10 +68,6 @@ import statefile
 from config import MarbleConfig
 
 SAMPLES = Path(__file__).resolve().parent.parent / "viewer" / "samples"
-# Every bundled scene with a GPT-2 run (viewer/samples/README.md).
-GPT2_SCENES = ["gpt2-capitals.mtj", "gpt2-decode.mtj", "gpt2-features.mtj",
-               "models-gpt2-distilgpt2.mtj", "models-qwen-gpt2.mtj", "scene-abc.mtj",
-               "self-portrait.mtj", "single.mtj"]
 
 SAFETY = 4.0
 ILL_CONDITIONED = 1e-3
@@ -118,38 +117,6 @@ def missing_fields(scene: dict) -> list[str]:
             if m.get(k) is None and not (k == "revision" and _is_local_dir(m.get("id"))):
                 out.append(f"analysis.models[{i}].{k}")
     return out
-
-
-def blockers(scene: dict) -> list[str]:
-    """Why `scene` cannot be re-run here; empty when it can."""
-    meta = scene.get("meta") or {}
-    models = [m for m in (scene.get("analysis") or {}).get("models") or []
-              if isinstance(m, dict)]
-    why = []
-    if meta.get("space") == "readout":
-        why.append("a cross-model readout-space scene (pipeline.run_model_scene); its "
-                   "runs are next-token distributions over a shared vocabulary, and "
-                   "this re-run covers single-model captures (mottled export)")
-    if scene.get("blast"):
-        why.append("a blast scene (pipeline.run_blast), not a mottled export scene")
-    backends = {m.get("backend") for m in models} or {meta.get("backend")}
-    if backends - {"transformers", None}:
-        why.append(f"captured with backend {sorted(backends - {None})}; only "
-                   "'transformers' captures are re-run")
-    if len({m.get("id") for m in models}) > 1:
-        why.append("its runs come from different models")
-    missing = missing_fields(scene)
-    if missing and not isinstance(scene.get("analysis"), dict):
-        n = len(scene["runs"])
-        has = ", ".join(f"{k}={meta[k]!r}" for k in ("model", "backend") if k in meta)
-        lacks = [k for k in ("revision", "dtype", "lens") if k not in meta]
-        why.append(f"it has no analysis record, and its meta has only {has} "
-                   f"(no {', '.join(lacks)}); a re-run needs analysis.config, "
-                   f"analysis.prompts and analysis.models[i].{{{','.join(MODEL_FIELDS)}}} "
-                   f"for each of its {n} run(s)")
-    elif missing:
-        why.append(f"its analysis record lacks {', '.join(missing)}")
-    return why
 
 
 # ------------------------------------------------------------- the re-run
@@ -377,7 +344,7 @@ def tiny_rebuild(tiny_scene):
 
 
 def test_an_exported_scene_reconstructs_from_its_own_record(tiny_scene):
-    assert blockers(tiny_scene) == []
+    assert missing_fields(tiny_scene) == []
     report = check_reconstructs(tiny_scene, _load_local)
     assert "pairwise distances" in report and "terrain z" in report
 
@@ -439,9 +406,8 @@ def test_a_missing_record_field_is_named_not_defaulted(tiny_scene):
     del partial["analysis"]["config"]["seed"]
     partial["analysis"]["models"][1]["dtype"] = None
     assert missing_fields(partial) == ["analysis.config.seed", "analysis.models[1].dtype"]
-    assert blockers(partial) == [
-        "its analysis record lacks analysis.config.seed, analysis.models[1].dtype"]
-    # The bundled samples predate the record: none carries one.
+    # The bundled samples predate the record: none carries one, so none can
+    # be re-run, and their fidelity to a real capture stays unchecked.
     single = statefile.load_scene(SAMPLES / "single.mtj")
     assert missing_fields(single) == [
         "analysis.config", "analysis.prompts", "analysis.models[0].id",
@@ -468,16 +434,6 @@ def _load_hub(model_id, revision, dtype):
 
 
 @pytest.mark.network
-@pytest.mark.parametrize("name", GPT2_SCENES)
-def test_bundled_gpt2_scene_reconstructs(name):
-    scene = statefile.load_scene(SAMPLES / name)
-    why = blockers(scene)
-    if why:
-        pytest.skip(f"{name} cannot be reconstructed: " + "; ".join(why))
-    print(check_reconstructs(scene, _load_hub))
-
-
-@pytest.mark.network
 def test_fresh_gpt2_export_reconstructs_from_its_own_record(tmp_path):
     # The scene `mottled export` writes today, re-run from nothing but its
     # record. This checks that the record is enough to rebuild the scene, and
@@ -487,5 +443,5 @@ def test_fresh_gpt2_export_reconstructs_from_its_own_record(tmp_path):
     out = tmp_path / "gpt2.mtj"
     assert cli.main(["export", *GPT2_PROMPTS, "--model", "gpt2", "-o", str(out)]) == 0
     scene = statefile.load_scene(out)
-    assert blockers(scene) == []
+    assert missing_fields(scene) == []
     print(check_reconstructs(scene, _load_hub))
