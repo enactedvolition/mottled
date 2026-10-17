@@ -27,7 +27,7 @@ offline against tiny locally-built models.
 Running the tool:
 
 ```bash
-mottled                              # Streamlit explorer (ui.py)
+mottled ui                           # Streamlit explorer (ui.py); bare `mottled` prints help
 mottled serve --model gpt2           # stdlib server: viewer + capture API
 mottled capture "a" "b" | mottled project > s.mtj   # the stages, piped
 mottled inspect s.mtj --ndjson       # per-state records; --json summary
