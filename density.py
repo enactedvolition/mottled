@@ -8,8 +8,12 @@ point cloud (plus padding) and guaranteed to return finite values.
 The estimate is made from one run's worth of points, so it is noisy:
 `compute_density(..., bootstrap=B)` additionally resamples the points B times
 and records the per-cell standard error of the density (`Landscape.density_se`)
-— the confidence field viewers use to show where the terrain is measurement
-and where it is bandwidth artifact.
+— where the estimate is least stable under resampling. It is a lower bound on
+the estimate's error, not a confidence statement (docs/validity.md). The
+resampling treats states as independent, and one run's layer-token states are
+not: states that repeat one another shrink the SE without adding information.
+And every resample has the same n, so Scott's bandwidth barely moves: the SE
+cannot say where the terrain is a bandwidth artifact.
 """
 
 from __future__ import annotations

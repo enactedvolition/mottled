@@ -40,11 +40,17 @@ terrain and draped trajectory points; raw trajectories don't).
 
 The uncertainty controls surface two honesty signals the format now carries.
 The **uncertainty toggle** washes the terrain toward amber where the density
-estimate is least stable across bootstrap resamples — the height there is
-bandwidth artifact more than measurement. The inspector's **nbhd preserved**
+estimate is least stable across bootstrap resamples. That is a lower bound,
+not a confidence statement: the bootstrap treats dependent states as
+independent and holds the bandwidth fixed, so terrain that stays its own
+colour is not thereby confirmed. The inspector's **nbhd preserved**
 line reports how much of a state's hidden-space neighborhood survived the 2-D
 projection at the point you hover: a low percentage means the flattened
-position is not to be trusted.
+position is not to be trusted. It, and the reading panel's fidelity line,
+read the scene's within-layer score (`layer_fidelity`) and say so; a scene
+without one (older, or prompts of six tokens or fewer) falls back to the
+score pooled across layers, which mixes in neighbors from other layers and on
+GPT-2 cannot tell PCA from a random projection.
 
 Run A is drawn solid; runs B, C, … get dash patterns and reduced opacity,
 with labels prefixed `B · token` etc. Comparison summaries (`hausdorff`,
@@ -61,8 +67,9 @@ Everything is per `docs/mtj-format.md`, version 1:
   (`(W,)`, `(H,)`, `(H, W)`; `z[i][j]` is the height at `(x[j], y[i])`) plus
   optional `terrain.{density,se}` `(H, W)` uncertainty layers;
 - `runs[]`, each with a required `points` array `(N, L, 3)` and optional
-  `entropy` `(L, T)`, `quality` `(L, T)` (projection fidelity),
-  `attention` `(L-1, T, T)`, and manifest `topk`
+  `entropy` `(L, T)`, `quality` `(L, T)` (projection fidelity, pooled across
+  layers), `layer_fidelity.preservation` `(L, T)` (within-layer, what the flag
+  reads), `attention` `(L-1, T, T)`, and manifest `topk`
   `[L][T][k]` of `[token, prob]` pairs;
 - array references are resolved strictly through `manifest.arrays` — never by
   the `run{i}.` naming convention;

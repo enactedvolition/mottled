@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Review fixes: what the trust signals measure, and what metrics are called
+- **The low-fidelity flag reads within-layer preservation.** The amber ✕
+  markers, the explorer's fidelity header, the basin's trust sentence, and
+  the viewer's reading panel and inspector all read neighborhood
+  preservation pooled across layers, which mixes in cross-layer neighbors:
+  on GPT-2 it ranks a random projection above PCA. They now read
+  within-layer preservation, the worse of euclidean and cosine
+  (`projection.fidelity_basis`), and name the measure they read. A run of
+  six tokens or fewer, where the within-layer score is 1.0 for any
+  projection, falls back to the pooled score and says so. The explorer's
+  "Neighborhood preservation per layer" chart, which plotted the pooled
+  score, now plots what the flag reads and is labelled with it.
+- **The cut is measured from chance.** `LOW_FIDELITY = 0.5` now means
+  halfway from what a random placement keeps (k / (n − 1)) to keeping every
+  neighbor (`projection.low_fidelity_cut`), which is the plain 0.5 when
+  chance is near 0. Within a layer of T tokens chance is 5 / (T − 1), at or
+  above 0.5 for prompts of 11 tokens or fewer, where the plain cut could
+  not flag even a projection with every layer shuffled (tiny model, 7
+  tokens: 0% flagged under the plain cut, 89% under this one). Expect more
+  states to be flagged than before.
+- **`.mtj`: `runs[].layer_fidelity`** (additive, no version bump):
+  `{ "preservation" → (L, T), "k", "chance" }`, written when a run has the
+  within-layer score. `quality` keeps its meaning. The viewer prefers
+  `layer_fidelity` and falls back to `quality`, so the bundled samples,
+  written before it, report the same numbers as before, now labelled
+  "pooled across layers".
+- **Renamed:** `metrics.semantic_drift` is now `metrics.layer_cosine_drift`,
+  and the research-metrics key `avg_semantic_drift` is now
+  `avg_layer_cosine_drift` (the explorer's label follows). It is the cosine
+  distance between consecutive layers' states — a change of direction in
+  hidden space, not of meaning. The key reached no file format, analysis
+  record or CLI output, only the explorer's panel, so it was renamed rather
+  than kept alongside.
+- **Each research metric names its space.** The explorer's *Research
+  metrics* panel printed a projected path's length and curvature beside
+  hidden-space measurements as bare numbers. Each line now says where it was
+  measured — *projection*, *hidden space* or *readout* (`metrics.SPACE`) —
+  and a caption says that the projection ones measure the picture.
+- **The density SE is no longer called a confidence field.** `density.py`,
+  the README, `docs/mtj-format.md` and the viewer README described the
+  bootstrap SE as the terrain's confidence, and `docs/validity.md` as useful
+  for spotting bandwidth artifacts. It is neither: it treats dependent states
+  as independent (on the bundled GPT-2 scenes it is about a fifth of a block
+  bootstrap over token trajectories) and resamples at a near-fixed bandwidth
+  (doubling the bandwidth moves the terrain by more than two SE in 95% of
+  cells). The wording now says lower bound, and says what it cannot show.
+
 ### Does a better lens predict what a patch does? (pre-registered)
 - **`experiments/patching.py`** overwrites the residual state at one site of
   exact `input_ids` and returns the model's own final logits (not a lens),

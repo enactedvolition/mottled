@@ -135,6 +135,36 @@ def test_render_flags_low_fidelity_states_on_the_scene():
     assert not any("low fidelity" in (tr.name or "") for tr in clean.data)
 
 
+def test_the_flag_and_the_prose_read_within_layer_preservation():
+    """Pooled preservation can stay perfect while every layer is scrambled:
+    cross-layer neighbors survive a within-layer shuffle. The ✕ markers and
+    the trust sentence read the within-layer score where there is one (the
+    pooled one drove both before, and could not tell PCA from random on
+    GPT-2), and say so."""
+    from config import MarbleConfig
+    from projection import ProjectionQuality
+    from ui import render, run_pipeline
+
+    result = run_pipeline(MarbleConfig(model="tiny", use_cache=False), PROMPT,
+                          **synthetic.mt())
+    traj = result["traj"]
+    shape = (traj.n_layers, traj.n_tokens)
+    scrambled = ProjectionQuality(
+        preservation=np.ones(shape, np.float32), residual=None,
+        explained_variance=0.9, k=10, per_layer=np.full(shape, 0.2, np.float32),
+        per_layer_cosine=np.full(shape, 0.4, np.float32), k_layer=5, chance_layer=0.3)
+    fig = render(traj, result["mesh"], result["trajectories"], result["fine_paths"],
+                 quality=scrambled)
+    marks = [tr for tr in fig.data if "low fidelity" in (tr.name or "")]
+    assert marks and "within-layer" in marks[0].name
+    assert sum(len(tr.x) for tr in marks) == sum(len(t.points) for t in result["trajectories"])
+
+    r = A.analyze(traj, result["coords"], result["landscape"])
+    text = A.explain(r, traj, quality=scrambled)
+    assert "suggestive, not" in text and "within-layer" in text
+    assert "**20%**" in text and "keep 30%" in text   # the worse metric; chance
+
+
 def test_density_at_matches_grid_nodes():
     _, coords, landscape = _pipeline()
     gx, gy = landscape.grid_x, landscape.grid_y

@@ -186,6 +186,41 @@ test("loadScene resolves optional uncertainty layers (terrain se/density, run qu
   assert.deepStrictEqual(Array.from(scene.runs[0].quality.data), [0.75, 0.25]);
 });
 
+test("loadScene resolves layer_fidelity, and reads a malformed one as null", () => {
+  const scene = (lf) => MTJ.loadScene(buildMtj({
+    manifest: {
+      format: "mottled-trajectory", version: 1, kind: "scene",
+      terrain: { x: "x", y: "y", z: "z" },
+      runs: [{ label: "A", tokens: ["a", "b"], points: "pts", quality: "q",
+               layer_fidelity: lf }],
+      arrays: {
+        x: { dtype: "float32", shape: [2], offset: 0, length: 8 },
+        y: { dtype: "float32", shape: [2], offset: 16, length: 8 },
+        z: { dtype: "float32", shape: [2, 2], offset: 32, length: 16 },
+        pts: { dtype: "float32", shape: [2, 1, 3], offset: 48, length: 24 },
+        q: { dtype: "float32", shape: [1, 2], offset: 80, length: 8 },
+        lf: { dtype: "float32", shape: [1, 2], offset: 96, length: 8 },
+      },
+    },
+    blob: (() => {               // float32 index = byte offset / 4
+      const v = new Array(28).fill(0);
+      v.splice(0, 2, 0, 1); v.splice(4, 2, 0, 1); v.splice(8, 4, 0, 0.5, 0.5, 1);
+      v.splice(12, 6, 0, 0, 0, 1, 1, 1); v.splice(20, 2, 1, 1); v.splice(24, 2, 0.2, 0.6);
+      return f32blob(v);
+    })(),
+  })).runs[0].layerFidelity;
+
+  const lf = scene({ preservation: "lf", k: 1, chance: 1 / 3 });
+  assert.deepStrictEqual(lf.preservation.shape, [1, 2]);
+  assert.ok(Math.abs(lf.preservation.data[0] - 0.2) < 1e-6);
+  assert.strictEqual(lf.k, 1);
+  assert.strictEqual(lf.chance, 1 / 3);
+  assert.strictEqual(scene({ preservation: "pts" }), null);      // not (L, T)
+  assert.strictEqual(scene({ preservation: "nope" }), null);     // dangling
+  assert.strictEqual(scene(undefined), null);                    // older scene
+  assert.strictEqual(scene({ preservation: "lf", chance: "x" }).chance, null);
+});
+
 test("loadScene tolerates scenes with no uncertainty layers (older writers)", () => {
   // A pre-v3 scene: terrain has only x/y/z, runs have no quality array.
   const buf = buildMtj({

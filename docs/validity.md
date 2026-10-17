@@ -78,7 +78,16 @@ when hundreds or thousands of dimensions become two or three.
 neighborhood preservation, PCA reconstruction residual, and explained
 variance; the explorer prints the fidelity header inline and flags
 low-preservation states on the terrain; `attractor.explain` folds the
-basin's own preservation into its prose.
+basin's own preservation into its prose. The flag, the header, the prose
+and the viewer's reading panel all read **within-layer** preservation (each
+state's nearest neighbors among its own layer's states, the worse of
+euclidean and cosine), cut halfway between what a random placement keeps and
+keeping every neighbor. Preservation pooled across layers mixes in
+cross-layer neighbors: on GPT-2 small it ranks a random projection above PCA
+(0.339 vs 0.318) where the within-layer score ranks them correctly (0.447 vs
+0.550). A run of six tokens or fewer has no within-layer score that can
+discriminate (every other state is a neighbor), so there the flag falls back
+to the pooled score and says so; read those flags with that weakness in mind.
 
 **What that does not cover.** A good *average* fidelity score does not
 validate the particular visually salient feature a reader interprets —
@@ -110,8 +119,13 @@ special regime of the model.
 resamples *individual states* with replacement. Because layer-token states
 within a run are highly dependent, that i.i.d. bootstrap understates
 uncertainty: it treats dependent observations as exchangeable, so
-`density_se` is a lower bound on the honest error, useful for spotting
-bandwidth artifacts but not for confidence statements about the model.
+`density_se` is a lower bound on the honest error, not a confidence
+statement about the model. On the bundled GPT-2 scenes it is about a fifth
+of a block bootstrap over token trajectories, and repeating states shrinks it
+though they add no information. Nor does it cover the bandwidth: every
+resample has the same size, so Scott's rule picks nearly the same bandwidth,
+and doubling that bandwidth moves the terrain by more than two SE in almost
+every cell. Low SE does not mean the shape is robust to the estimator.
 The honest upgrades, in order of strength:
 
 - **Block bootstrap** over prompts, token trajectories, or contiguous layer

@@ -112,7 +112,7 @@ def render(
     show_attention: bool = False,
     basin: attractor_mod.BasinReport | None = None,
     quality: projection_mod.ProjectionQuality | None = None,
-    low_fidelity: float = 0.5,
+    low_fidelity: float = projection_mod.LOW_FIDELITY,
 ) -> go.Figure:
     """Build the 3-D scene: terrain surface, token trajectories, animated marbles.
 
@@ -193,25 +193,29 @@ def render(
     # Inline honesty: flag the primary run's states whose local neighborhood
     # did not survive the projection, right on the scene — so a low-fidelity
     # basin can't be read as solid structure. The full numbers live in the
-    # Uncertainty panel; this is the unavoidable at-a-glance mark.
+    # Uncertainty panel; this is the unavoidable at-a-glance mark. It reads
+    # within-layer preservation (projection.fidelity_basis): the pooled score
+    # can rate a scrambled projection as highly as PCA.
     if quality is not None:
-        pres = np.asarray(quality.preservation)
+        basis = projection_mod.fidelity_basis(quality)
+        cut = projection_mod.low_fidelity_cut(basis.chance, low_fidelity)
+        pres = np.asarray(basis.values)
         lx, ly, lz, ltext = [], [], [], []
         for t in trajectories:
             tok = t.token if isinstance(t.token, int) else traj.n_tokens - 1
             series = pres[:, tok]
             for l in range(min(len(t.points), len(series))):
-                if series[l] < low_fidelity:
+                if series[l] < cut:
                     lx.append(t.points[l, 0]); ly.append(t.points[l, 1])
                     lz.append(t.points[l, 2] + 0.02)
-                    ltext.append(f"low fidelity · {series[l]:.0%} of k-NN kept"
-                                 f"<br>layer {l} · {t.label or t.token}")
+                    ltext.append(f"low fidelity · {series[l]:.0%} of {basis.metric} "
+                                 f"k-NN kept<br>layer {l} · {t.label or t.token}")
         if lx:
             fig.add_trace(go.Scatter3d(
                 x=lx, y=ly, z=lz, mode="markers",
                 marker={"size": 7, "symbol": "x", "color": tokens.AMBER,
                         "line": {"color": tokens.AMBER, "width": 1}},
-                name=f"low fidelity (<{low_fidelity:.0%} k-NN kept)",
+                name=f"low fidelity (<{cut:.0%} {basis.metric} k-NN kept)",
                 hoverinfo="text", text=ltext))
 
     if show_attention and traj.attention is not None and len(trajectories) == traj.n_tokens:

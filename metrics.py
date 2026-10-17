@@ -112,8 +112,13 @@ def layer_displacement(hidden: np.ndarray) -> np.ndarray:
     return np.linalg.norm(np.diff(np.asarray(hidden, dtype=np.float64), axis=0), axis=-1)
 
 
-def semantic_drift(hidden: np.ndarray) -> np.ndarray:
-    """Cosine distance between consecutive layers' states: (L-1, T)."""
+def layer_cosine_drift(hidden: np.ndarray) -> np.ndarray:
+    """Cosine distance between consecutive layers' states: (L-1, T).
+
+    A change of direction in hidden space, not of meaning: it was called
+    `semantic_drift`, which named the interpretation docs/validity.md says
+    a representation-space measurement does not license.
+    """
     h = np.asarray(hidden, dtype=np.float64)
     a, b = h[:-1], h[1:]
     cos = (a * b).sum(axis=-1) / np.maximum(
@@ -179,7 +184,7 @@ def summarize(traj: StateTrajectory, coords: np.ndarray, token: int = -1) -> dic
     out = {
         "trajectory_length": path_length(path),
         "integrated_curvature": integrated_curvature(path),
-        "avg_semantic_drift": float(semantic_drift(h[:, None, :]).mean()),
+        "avg_layer_cosine_drift": float(layer_cosine_drift(h[:, None, :]).mean()),
         "avg_layer_displacement": float(layer_displacement(h[:, None, :]).mean()),
         "final_vector_norm": float(np.linalg.norm(h[-1])),
     }
@@ -194,6 +199,24 @@ def summarize(traj: StateTrajectory, coords: np.ndarray, token: int = -1) -> dic
     if traj.components is not None and {"attn", "mlp"} <= set(traj.components):
         out["avg_attn_share"] = float(component_shares(traj, token)[:, 0].mean())
     return out
+
+
+# Where each `summarize` metric is measured, printed beside its number. A
+# projected path's length and turning are properties of the picture (another
+# projection draws another path); the rest are measured on the full hidden
+# states or on the readout's distributions. Unlabelled, a bare list puts them
+# on one footing.
+SPACE = {
+    "trajectory_length": "projection",
+    "integrated_curvature": "projection",
+    "avg_layer_cosine_drift": "hidden space",
+    "avg_layer_displacement": "hidden space",
+    "final_vector_norm": "hidden space",
+    "nn_stability": "hidden space",
+    "avg_attn_share": "hidden space",
+    "entropy_collapse": "readout",
+    "final_entropy": "readout",
+}
 
 
 METRICS = {

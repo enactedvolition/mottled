@@ -253,9 +253,9 @@ function buildTerrain(t) {
     const k = iso < 0.06 ? 0.82 : 1.0;
     col.set([shade[0] * k, shade[1] * k, shade[2] * k], v * 3);
     // uncertainty shading: blend the base colour toward SE_COLOR by the
-    // cell's relative bootstrap standard error (confident cells unchanged)
+    // cell's relative bootstrap standard error (lowest-SE cells unchanged)
     const u = se ? Math.min(1, se[v] / seMax) : 0;
-    const um = 0.15 + 0.85 * u; // keep a floor so confident terrain reads too
+    const um = 0.15 + 0.85 * u; // keep a floor so low-SE terrain reads too
     seCol.set([shade[0] * k * (1 - um) + SE_COLOR[0] * um,
                shade[1] * k * (1 - um) + SE_COLOR[1] * um,
                shade[2] * k * (1 - um) + SE_COLOR[2] * um], v * 3);
@@ -818,12 +818,15 @@ function setPickInfo(pick, pinned) {
               (extrap ? `<span class="dim"> (extrapolation)</span>` : "") + `</div>`;
     }
   }
-  if (run.quality) {
-    const [Lq, Tq] = run.quality.shape;
+  // the same measure the reading panel's fidelity line reads
+  const q = run.layerFidelity ? run.layerFidelity.preservation : run.quality;
+  if (q) {
+    const [Lq, Tq] = q.shape;
     if (pick.layer < Lq && tok < Tq) {
-      const pres = run.quality.data[pick.layer * Tq + tok];
+      const pres = q.data[pick.layer * Tq + tok];
       html += `<div>nbhd preserved <b>${(pres * 100).toFixed(0)}%</b>` +
-              `<span class="dim"> (2-D fidelity)</span></div>`;
+              `<span class="dim"> (2-D fidelity, ` +
+              `${run.layerFidelity ? "within layer" : "pooled across layers"})</span></div>`;
     }
   }
   if (run.topk && run.topk[pick.layer] && run.topk[pick.layer][tok]) {
@@ -969,7 +972,7 @@ function buildUI(scene) {
   ui.attnToggle.checked = state.showAttention = false;
 
   // Uncertainty defaults ON when the scene carries a standard-error field:
-  // the confidence of the terrain should be visible before the viewer trusts
+  // the terrain's instability should be visible before the viewer trusts
   // its shape, not something a user has to opt into.
   const hasSE = !!(scene.terrain && scene.terrain.se);
   ui.uncertaintyRow.hidden = !hasSE;
@@ -1074,8 +1077,11 @@ function applyBlastLayout() {
   for (let i = 0, n = q.length / 2; i < n; i++) {
     p[i * 3] = q[i * 2]; p[i * 3 + 1] = q[i * 2 + 1];
   }
-  // the inspector's nbhd line and the reading panel's fidelity are this layout's
+  // the inspector's nbhd line and the reading panel's fidelity are this
+  // layout's. A blast layout's quality is already scored within each layer
+  // (blast._quality), against the plain cut as before: no chance level.
   run.quality = lay.quality;
+  run.layerFidelity = lay.quality ? { preservation: lay.quality, k: null, chance: null } : null;
   state.blast.colour = MTJ.blastColourLabel(state.scene.blast, lay,
                                             state.blast.chosen, state.blast.colour);
 }

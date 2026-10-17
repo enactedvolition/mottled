@@ -77,6 +77,42 @@ def test_python_writer_decodes_in_js_viewer(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_layer_fidelity_decodes_in_js_viewer(tmp_path):
+    """The within-layer fidelity record (what the low-fidelity flag reads)
+    reads the same in the viewer as in Python, and a run too short to carry
+    one reads null in both — so the viewer falls back to `quality`."""
+    cfg = MarbleConfig(model="tiny", use_cache=False, density_bootstrap=0)
+    result = run_scene(cfg, ["the capital of france is paris and the capital of germany",
+                             "the capital of france is"], **synthetic.mt())
+    path = tmp_path / "scene.mtj"
+    statefile.save_scene(result, path)
+
+    script = r"""
+      const MTJ = require(process.argv[1]);
+      const scene = MTJ.loadScene(require("fs").readFileSync(process.argv[2]));
+      process.stdout.write(JSON.stringify(scene.runs.map((r) => r.layerFidelity && {
+        shape: r.layerFidelity.preservation.shape, k: r.layerFidelity.k,
+        chance: r.layerFidelity.chance,
+        sum: r.layerFidelity.preservation.data.reduce((a, b) => a + b, 0) })));
+    """
+    js = json.loads(subprocess.run(
+        ["node", "-e", script, str(ROOT / "viewer" / "mtj.js"), str(path)],
+        capture_output=True, text=True, check=True).stdout)
+
+    py = statefile.load_scene(path)["runs"]
+    lf = py[0]["layer_fidelity"]
+    assert list(js[0]["shape"]) == list(lf["preservation"].shape)
+    T = len(py[0]["tokens"])
+    assert js[0]["k"] == lf["k"] == 5 and js[0]["chance"] == lf["chance"] == 5 / (T - 1)
+    assert js[0]["sum"] == pytest.approx(float(lf["preservation"].sum()), rel=1e-6)
+    import numpy as np
+
+    from projection import fidelity_basis
+    assert np.array_equal(lf["preservation"], fidelity_basis(result["quality_list"][0]).values)
+    assert "layer_fidelity" not in py[1] and js[1] is None
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_blast_record_decodes_in_js_viewer(tmp_path):
     """The blast record (blast.py) reads the same in the viewer as in Python:
     every layout, its positions and arrays, and the pellets."""

@@ -129,6 +129,30 @@
             "x-mtj-array": true,
             "description": "(layers, tokens) neighborhood preservation"
           },
+          "layer_fidelity": {
+            "type": "object",
+            "description": "what the low-fidelity flag reads (projection.fidelity_basis); absent when the run has too few tokens for it, and readers then fall back to `quality`",
+            "required": [
+              "preservation"
+            ],
+            "properties": {
+              "preservation": {
+                "type": "string",
+                "minLength": 1,
+                "x-mtj-array": true,
+                "description": "(layers, tokens) within-layer neighborhood preservation, the worse of euclidean and cosine"
+              },
+              "k": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chance": {
+                "type": "number",
+                "minimum": 0,
+                "description": "k / (tokens - 1): what a random placement keeps on average"
+              }
+            }
+          },
           "attention": {
             "type": "string",
             "minLength": 1,
