@@ -165,11 +165,10 @@ def test_projection_quality_carries_per_layer_fields(hidden):
 
 # ---- the low-fidelity flag (fidelity_basis + low_fidelity_cut) ----------
 
-def test_the_cut_is_halfway_from_chance_to_every_neighbor_kept():
+def test_the_cut_is_chance_within_a_layer_and_the_plain_one_without():
     from projection import LOW_FIDELITY, low_fidelity_cut
-    assert low_fidelity_cut(0.0) == LOW_FIDELITY == 0.5     # the plain cut, as before
-    assert low_fidelity_cut(0.5) == 0.75
-    assert low_fidelity_cut(1.0) == 1.0
+    assert low_fidelity_cut(0.0) == LOW_FIDELITY == 0.5     # pooled: as before
+    assert low_fidelity_cut(5 / 11) == 5 / 11               # no better than random
 
 
 def test_flag_reads_within_layer_and_falls_back_only_where_it_cannot_discriminate():
@@ -229,20 +228,23 @@ def _three_ways(prompt):
 
 def test_flag_marks_a_random_projection_far_more_than_pca():
     """The trust signal has to tell a projection that kept structure from one
-    that did not. On a real forward pass (the tiny model, 13 tokens, so
-    k = 5 and chance = 5/12 = 0.42, cut 0.71), measured: mean within-layer
-    preservation PCA 0.64, random 0.48, shuffled 0.37; flagged PCA 57%
-    (53-62%), random 88%, shuffled 96% (93-98%)."""
+    that did not, without firing on most of the one that did. On a real
+    forward pass (the tiny model, 13 tokens, so k = 5 and the cut is chance,
+    5/12 = 0.42), measured: mean within-layer preservation PCA 0.64, random
+    0.48, shuffled 0.37; flagged PCA 22% (18-27%), random 53%, shuffled 79%
+    (70-84%). A cut halfway from chance to 1 flagged PCA 57%."""
     r = _three_ways("the capital of france is paris and the capital of germany is berlin")
     assert r["random"].mean() > r["pca"].mean() + 0.2
-    assert r["shuffled"].min() > 0.85
+    assert r["shuffled"].mean() > r["pca"].mean() + 0.4
+    assert r["shuffled"].min() > 0.6
+    assert r["pca"].max() < 0.35                 # PCA is not flagged wholesale
 
 
 def test_a_plain_cut_cannot_flag_a_short_prompt_and_the_chance_relative_one_can():
     """Seven tokens: a random placement keeps 5/6 of its within-layer
     neighbors on average, so a plain 0.5 cut flagged nothing at all, not even
-    PCA's points shuffled within every layer. Measured with the cut halfway
-    from chance: PCA 47%, random 77%, shuffled 89% (78-97%)."""
+    PCA's points shuffled within every layer. Measured with the cut at
+    chance: PCA 47%, random 77%, shuffled 89% (78-97%)."""
     r = _three_ways("the capital of france is paris and")
     assert r["shuffled_plain"].max() == 0.0
     assert r["shuffled"].min() > 0.7

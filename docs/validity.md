@@ -81,8 +81,10 @@ low-preservation states on the terrain; `attractor.explain` folds the
 basin's own preservation into its prose. The flag, the header, the prose
 and the viewer's reading panel all read **within-layer** preservation (each
 state's nearest neighbors among its own layer's states, the worse of
-euclidean and cosine), cut halfway between what a random placement keeps and
-keeping every neighbor. Preservation pooled across layers mixes in
+euclidean and cosine) against its chance level: a state is flagged when it
+keeps no more of its neighbors than a random placement would (below chance,
+k / (T − 1)). Read the mean against that chance level too; the flag only
+marks the states at or under it. Preservation pooled across layers mixes in
 cross-layer neighbors: on GPT-2 small it ranks a random projection above PCA
 (0.339 vs 0.318) where the within-layer score ranks them correctly (0.447 vs
 0.550). A run of six tokens or fewer has no within-layer score that can

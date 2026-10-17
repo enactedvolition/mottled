@@ -162,6 +162,7 @@ def test_the_flag_and_the_prose_read_within_layer_preservation():
     r = A.analyze(traj, result["coords"], result["landscape"])
     text = A.explain(r, traj, quality=scrambled)
     assert "suggestive, not" in text and "within-layer" in text
+    assert "no better than a random placement" in text
     assert "**20%**" in text and "keep 30%" in text   # the worse metric; chance
 
 

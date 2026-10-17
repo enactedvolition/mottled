@@ -14,14 +14,16 @@
   projection, falls back to the pooled score and says so. The explorer's
   "Neighborhood preservation per layer" chart, which plotted the pooled
   score, now plots what the flag reads and is labelled with it.
-- **The cut is measured from chance.** `LOW_FIDELITY = 0.5` now means
-  halfway from what a random placement keeps (k / (n − 1)) to keeping every
-  neighbor (`projection.low_fidelity_cut`), which is the plain 0.5 when
-  chance is near 0. Within a layer of T tokens chance is 5 / (T − 1), at or
-  above 0.5 for prompts of 11 tokens or fewer, where the plain cut could
-  not flag even a projection with every layer shuffled (tiny model, 7
-  tokens: 0% flagged under the plain cut, 89% under this one). Expect more
-  states to be flagged than before.
+- **The within-layer flag is cut at chance.** A state is flagged when it
+  keeps no more of its within-layer neighbors than a random placement would:
+  below chance, k / (T − 1) (`projection.low_fidelity_cut`). A plain 0.5
+  cannot serve there: for prompts of 11 tokens or fewer chance is at or
+  above 0.5, and at 7 tokens it flagged nothing, not even a projection with
+  every layer shuffled. A cut halfway from chance to 1 saturated (tiny
+  model, 13 tokens: PCA 57% flagged); at chance it flags PCA 22%, random
+  projections 51% and the shuffle 77%. The mean against chance stays the
+  headline; the fraction counts states below chance. The pooled fallback,
+  and every older scene, keeps the plain `LOW_FIDELITY = 0.5` cut.
 - **`.mtj`: `runs[].layer_fidelity`** (additive, no version bump):
   `{ "preservation" → (L, T), "k", "chance" }`, written when a run has the
   within-layer score. `quality` keeps its meaning. The viewer prefers

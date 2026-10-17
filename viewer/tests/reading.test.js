@@ -54,15 +54,16 @@ test("scene fidelity reads the within-layer score, cut against its own chance", 
   // and is what the explorer's flag reads (projection.fidelity_basis)
   const arr = (v) => ({ data: Float32Array.from(v), shape: [1, v.length] });
   const run = { quality: arr([1, 1, 1, 1]),
-                layerFidelity: { preservation: arr([0.8, 0.75, 0.4, 1]), k: 5, chance: 0.4 } };
+                layerFidelity: { preservation: arr([0.8, 0.4, 0.2, 1]), k: 5, chance: 0.4 } };
   const f = R.sceneFidelity([run]);
   assert.strictEqual(f.metric, "within-layer");
-  assert.ok(Math.abs(f.mean - 0.7375) < 1e-6);
-  // cut = 0.4 + 0.5 * 0.6 = 0.7: 0.4 is below it, 0.75 is not
+  assert.ok(Math.abs(f.mean - 0.6) < 1e-6);
+  // the cut is chance itself: 0.2 is below it, 0.4 (at chance) is not
   assert.strictEqual(f.low_fraction, 0.25);
-  assert.deepStrictEqual(f.low_fidelity, [R.lowFidelityCut(0.4), R.lowFidelityCut(0.4)]);
+  assert.deepStrictEqual(f.low_fidelity, [0.4, 0.4]);
   assert.deepStrictEqual(f.chance, [0.4, 0.4]);
-  assert.match(R.fidelityNote(f), /within-layer.*random placement keeps 0\.4\b.*below 0\.7\)/);
+  assert.match(R.fidelityNote(f),
+               /within-layer.*random placement keeps 0\.4\b.*25% of states are no better than a random placement \(below chance 0\.4\)/);
 });
 
 test("an older scene falls back to pooled quality and says so", () => {
@@ -81,9 +82,10 @@ test("a scene mixing long and short runs says it mixed the measures", () => {
   ]);
   assert.strictEqual(f.metric, "mixed");
   assert.strictEqual(f.n, 4);
-  // 0.65 vs cut 0.6: kept; 0.45 vs the plain 0.5: low
+  // 0.65 vs chance 0.2: kept; 0.45 vs the plain 0.5: low
   assert.strictEqual(f.low_fraction, 0.25);
-  assert.match(R.fidelityNote(f), /pooled across layers for the rest.*below 0\.5–0\.6\)/);
+  assert.match(R.fidelityNote(f),
+               /pooled across layers for the rest.*random placement within a layer \(below chance 0\.2\), below 0\.5 where pooled/);
 });
 
 test("a within-layer score with no chance level keeps the plain cut", () => {

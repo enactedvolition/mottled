@@ -180,10 +180,13 @@ def _fidelity_clause(report: BasinReport, quality) -> str:
             + (f", where a random placement would keep {basis.chance:.0%}. " if within
                else ", pooled across layers. "))
     if basin_pres < low_fidelity_cut(basis.chance):
-        tail = ("That is low: read the basin's *shape* as suggestive, not "
-                "established — much of the local structure did not survive the "
-                "flattening.")
-    elif basin_pres < low_fidelity_cut(basis.chance, 0.8):
+        tail = (("That is no better than a random placement: " if within else
+                 "That is low: ") +
+                "read the basin's *shape* as suggestive, not established — much "
+                "of the local structure did not survive the flattening.")
+    # "high" is 0.8 of the way from chance to every neighbor kept (the plain
+    # 0.8 for the pooled score, whose chance is taken as 0)
+    elif basin_pres < basis.chance + 0.8 * (1.0 - basis.chance):
         tail = ("That is moderate: the basin's broad location is meaningful, its "
                 "fine structure less so.")
     else:
