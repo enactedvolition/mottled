@@ -30,13 +30,12 @@
   // conformance test; the explorer's ✕ markers use the same cut.
   const LOW_FIDELITY = 0.5;
 
-  // projection.low_fidelity_cut: LOW_FIDELITY of the way from what a random
-  // placement keeps (`chance`) to 1. Same operations in the same order, so
-  // both sides compute the same double.
+  // projection.low_fidelity_cut: a within-layer score is cut at its chance
+  // level (no better than a random placement); a score with none — pooled,
+  // or an older scene — at the plain LOW_FIDELITY.
   function lowFidelityCut(chance, lowFidelity) {
     const lf = lowFidelity === undefined ? LOW_FIDELITY : lowFidelity;
-    const c = chance == null ? 0 : chance;
-    return c + lf * (1 - c);
+    return chance != null && chance > 0 ? chance : lf;
   }
 
   /** Mean preservation and the share of states the projection may have moved. */
@@ -204,9 +203,15 @@
     else if (fidelity.metric === "mixed")
       what = `Mean neighborhood preservation ${mean}: within each layer for runs ` +
         `long enough to have the score, pooled across layers for the rest.`;
-    return `${what} ${pct}% of states are low-fidelity (below ` +
-      `${span(fidelity.low_fidelity)}) — drawn where the projection could put ` +
-      `them, not where they truly are.`;
+    // a within-layer score is cut at its chance level (projection.low_fidelity_cut)
+    let low = `low-fidelity (below ${span(fidelity.low_fidelity)})`;
+    if (fidelity.chance && fidelity.metric === "within-layer")
+      low = `no better than a random placement (below chance ${span(fidelity.chance)})`;
+    else if (fidelity.chance && fidelity.metric === "mixed")
+      low = `low-fidelity: no better than a random placement within a layer ` +
+        `(below chance ${span(fidelity.chance)}), below ${LOW_FIDELITY} where pooled`;
+    return `${what} ${pct}% of states are ${low} — drawn where the projection ` +
+      `could put them, not where they truly are.`;
   }
 
   function uncertaintyNote(hasUncertainty) {

@@ -199,6 +199,8 @@ def render(
     if quality is not None:
         basis = projection_mod.fidelity_basis(quality)
         cut = projection_mod.low_fidelity_cut(basis.chance, low_fidelity)
+        why = (f"no better than a random placement (below chance {cut:.2f})"
+               if basis.chance else f"below {cut:.2f}")
         pres = np.asarray(basis.values)
         lx, ly, lz, ltext = [], [], [], []
         for t in trajectories:
@@ -209,13 +211,13 @@ def render(
                     lx.append(t.points[l, 0]); ly.append(t.points[l, 1])
                     lz.append(t.points[l, 2] + 0.02)
                     ltext.append(f"low fidelity · {series[l]:.0%} of {basis.metric} "
-                                 f"k-NN kept<br>layer {l} · {t.label or t.token}")
+                                 f"k-NN kept, {why}<br>layer {l} · {t.label or t.token}")
         if lx:
             fig.add_trace(go.Scatter3d(
                 x=lx, y=ly, z=lz, mode="markers",
                 marker={"size": 7, "symbol": "x", "color": tokens.AMBER,
                         "line": {"color": tokens.AMBER, "width": 1}},
-                name=f"low fidelity (<{cut:.0%} {basis.metric} k-NN kept)",
+                name=f"low fidelity: {basis.metric} k-NN kept {why}",
                 hoverinfo="text", text=ltext))
 
     if show_attention and traj.attention is not None and len(trajectories) == traj.n_tokens:

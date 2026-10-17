@@ -63,9 +63,9 @@ def test_fidelity_summary_matches_the_python_reference(values, chance):
     assert got["low_fraction"] == pytest.approx(want["low_fraction"], abs=1e-12)
 
 
-def test_values_on_the_chance_relative_cut_fall_the_same_way():
-    """A state exactly at the cut is not low-fidelity on either side: the cut
-    is one double, computed by the same operations in the same order."""
+def test_values_on_the_chance_cut_fall_the_same_way():
+    """A state exactly at chance is not flagged on either side (the flag is
+    strictly below it), and one ulp under it is, on both."""
     chance = 5 / 11
     cut = P.low_fidelity_cut(chance)
     values = [np.nextafter(cut, 0), cut, np.nextafter(cut, 1)]

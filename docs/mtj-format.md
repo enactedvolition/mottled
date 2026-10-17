@@ -205,10 +205,10 @@ Fields:
     layer — the fraction of a state's k nearest same-layer neighbors kept,
     the worse of euclidean and cosine neighbors in hidden space — and
     `chance = k / (T - 1)` is what a random placement keeps on average. A
-    state is low-fidelity below `chance + 0.5 × (1 − chance)`. Absent when
-    the run has `T ≤ k + 1` tokens (every other state is then a neighbor and
-    any projection scores 1), and in scenes written before it; a reader
-    then falls back to `quality` with the plain `0.5` cut.
+    state is flagged below `chance`: no better than a random placement.
+    Absent when the run has `T ≤ k + 1` tokens (every other state is then a
+    neighbor and any projection scores 1), and in scenes written before it;
+    a reader then falls back to `quality` with the plain `0.5` cut.
   - `topk` *(optional)*: `[L][T][k]` list of `[token, probability]` pairs.
   - `generation` *(optional)*: the decode record when the run covers
     prompt + generated continuation: `{ "prompt_tokens", "new_tokens",

@@ -247,25 +247,29 @@ def neighborhood_preservation(X: np.ndarray, Y: np.ndarray, k: int = 10,
 # ✕ markers on the scene, and the viewer's scene panel, which would otherwise
 # disagree about the same run.
 #
-# Derivation: the fraction of the way from what a random placement keeps
-# (chance = k / (n - 1)) to keeping every neighbor. A state is low-fidelity
-# when it keeps less than half of that way (`low_fidelity_cut`), which is the
-# plain 0.5 cut when chance is near 0. The within-layer score needs the
-# correction: with k = 5 of T tokens its chance is 5 / (T - 1), at or above
-# 0.5 for every prompt of 11 tokens or fewer, so a plain 0.5 cut could not
-# flag a projection that kept no within-layer structure at all. Measured on
-# the tiny test model at 7 tokens: PCA's points shuffled within each layer
-# were flagged 0% under the plain cut and 89% (78-97%) under this one; at 13
-# tokens it flags PCA 57%, random projections 88%, the shuffle 96%
-# (tests/test_projection.py pins both). No measurement here argues for a
-# fraction other than one half; it is a convention, now with a fixed meaning.
+# The within-layer score is cut at its chance level, k / (T - 1): a state is
+# flagged when it keeps no more of its within-layer neighbors than a random
+# placement would. That is derived, not chosen. A plain 0.5 cannot serve
+# there: with k = 5 chance is at or above 0.5 for every prompt of 11 tokens
+# or fewer, so it flagged nothing at 7 tokens, not even a projection with
+# every layer shuffled. A cut halfway from chance to 1 (PR #62 as first
+# written) saturates. Flag rates, PCA / random / every layer shuffled, on the
+# tiny test model (k = 5, 3 weight seeds, 10 random maps and 10 shuffles
+# each; GPT-2 not measured here):
+#
+#     tokens     7         10        13        16        24        32
+#     chance   47/78/91   4/27/47  22/51/77  12/27/52  39/53/80  18/24/51
+#     halfway  47/78/91  33/74/91  57/86/98  69/93/99  86/98/100 74/84/99
+#
+# LOW_FIDELITY is the cut for a score with no chance level: the pooled
+# fallback and older scenes, read exactly as before.
 LOW_FIDELITY = 0.5
 
 
 def low_fidelity_cut(chance: float = 0.0, low_fidelity: float = LOW_FIDELITY) -> float:
-    """The preservation below which a state is flagged: `low_fidelity` of the
-    way from a random placement's expected score (`chance`) to 1."""
-    return chance + low_fidelity * (1.0 - chance)
+    """The preservation below which a state is flagged: the score's chance
+    level when it has one (within-layer), else the plain `low_fidelity`."""
+    return chance if chance > 0 else low_fidelity
 
 
 def fidelity_summary(preservation, low_fidelity: float = LOW_FIDELITY,

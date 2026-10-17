@@ -569,16 +569,18 @@ def main() -> None:
                            f"**{fidelity['mean']:.2f}** (k={basis.k}, worse of "
                            f"euclidean and cosine; a random placement keeps "
                            f"{basis.chance:.2f}). ")
+                low = (f"no better than a random placement (below chance "
+                       f"{fidelity['low_fidelity']:.2f})")
             else:
                 measure = (f"mean neighborhood preservation, pooled across layers, "
                            f"**{fidelity['mean']:.2f}** (k={basis.k}) — too few "
                            f"tokens for a within-layer score. The pooled one mixes "
                            f"in neighbors from other layers, and on GPT-2 it "
                            f"cannot tell PCA from a random projection. ")
+                low = f"low-fidelity (below {fidelity['low_fidelity']:.2f})"
             st.markdown(
                 f"**Projection fidelity** — {ev}{measure}"
-                f"**{fidelity['low_fraction']:.0%}** of states are low-fidelity "
-                f"(below {fidelity['low_fidelity']:.2f}) — "
+                f"**{fidelity['low_fraction']:.0%}** of states are {low} — "
                 f"flagged ✕ on the scene and drawn where the projection *could* "
                 f"put them, not where they truly are.")
         gen0 = traj.meta.get("generation")
@@ -777,7 +779,8 @@ def main() -> None:
                              f"worse of euclidean and cosine; chance "
                              f"{basis.chance:.2f}): mean **{basis.values.mean():.2f}** · "
                              f"this state **{basis.values[layer, token]:.2f}** — "
-                             "what the ✕ flag reads")
+                             "the ✕ flag marks states below chance, no better "
+                             "than a random placement")
                 st.write(f"pooled across layers (k={q.k}): "
                          f"mean **{q.preservation.mean():.2f}** · "
                          f"this state **{q.preservation[layer, token]:.2f}** — "
