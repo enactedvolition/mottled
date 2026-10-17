@@ -282,6 +282,16 @@ clean top-1 target, test documents:
 The per-layer intervals are unadjusted. Under no true difference, about 0.55
 of 11 would read "distinguishable" by chance; 8 did.
 
+**Replicated on a second runner.** Evidence run 39002136532 used the same
+inputs, with the lens pinned to `1ac72858`. All 11 per-layer verdicts and
+the pooled verdict came out the same, and both controls passed again (the
+positive control at 4.15e-4). Only one H1 number moved past the sixth
+significant digit: the layer-3 difference, from 0.121496 to 0.121589. Its
+interval and verdict did not change. The pooled difference went from
+0.123676 to 0.123684. The two summaries are not byte-identical across
+machines, because float rounding differs between runner CPUs at the fifth
+or sixth significant digit. Within one machine, reruns are byte-identical.
+
 **Scale, not only rank.** The calibration slopes fitted on train documents
 are 0.13–0.52 for the raw lens at layers 1–11 and 0.75–1.03 for the tuned
 lens. Read uncalibrated, the raw lens's predicted log-odds changes miss by
