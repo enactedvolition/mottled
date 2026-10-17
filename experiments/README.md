@@ -245,6 +245,87 @@ design above.
   identical apart from `timing`. Its H1 table is meaningless (random
   weights, random translators) and is not evidence about lenses.
 
+### Result of the registered run
+
+**Run.** Evidence run 39001132978, job 117304098323, 2026-10-17, on PR #59's
+merge commit `23a2d2b` (clean tree). Python 3.11.17, torch 2.13.0+cpu,
+transformers 5.14.1, 4 threads, 560 s for 160 items. GPT-2 resolved to the
+pinned `607a30d7…`, and the tuned lens to Space commit `1ac72858…` (lens
+sha256 `c9d8bda2…`). The committed
+[`results/lens_patch_predictiveness.summary.json`](results/lens_patch_predictiveness.summary.json)
+is that run's `summary.json`: its sha256 `8360f6c4…c267c` (20,025 bytes) is
+the one the job logged. The full `results.json` (697,677 bytes, sha256
+`78a23ad1…4da0`) is the run's artifact and is not committed. Every number
+below is read from the committed summary.
+
+**Controls passed.** Self-patch: max |Δlogit| = 0 and max |Δobs| = 0. Positive
+control at layer 12: max |Δpred − Δobs| = 4.0e-4 nats (tolerance 1e-3).
+
+**H1, as registered: supported pooled, and at 8 of 11 layers.** Donor patches,
+clean top-1 target, test documents:
+
+| Layer | ρ raw | ρ tuned | ρ tuned − ρ raw [95% CI] | Verdict |
+|---|---|---|---|---|
+| 1 | 0.336 | 0.501 | +0.165 [+0.016, +0.320] | tuned better |
+| 2 | 0.416 | 0.526 | +0.110 [−0.013, +0.250] | not distinguishable |
+| 3 | 0.518 | 0.640 | +0.121 [−0.008, +0.267] | not distinguishable |
+| 4 | 0.506 | 0.708 | +0.202 [+0.079, +0.337] | tuned better |
+| 5 | 0.579 | 0.738 | +0.159 [+0.053, +0.267] | tuned better |
+| 6 | 0.641 | 0.760 | +0.119 [+0.029, +0.219] | tuned better |
+| 7 | 0.664 | 0.790 | +0.126 [+0.043, +0.223] | tuned better |
+| 8 | 0.664 | 0.811 | +0.147 [+0.065, +0.252] | tuned better |
+| 9 | 0.719 | 0.844 | +0.124 [+0.049, +0.221] | tuned better |
+| 10 | 0.817 | 0.879 | +0.062 [+0.004, +0.135] | tuned better |
+| 11 | 0.888 | 0.914 | +0.025 [−0.013, +0.074] | not distinguishable |
+| pooled 1–11 | | | **+0.124 [+0.056, +0.204]** | **tuned better** |
+
+The per-layer intervals are unadjusted. Under no true difference, about 0.55
+of 11 would read "distinguishable" by chance; 8 did.
+
+**Scale, not only rank.** The calibration slopes fitted on train documents
+are 0.13–0.52 for the raw lens at layers 1–11 and 0.75–1.03 for the tuned
+lens. Read uncalibrated, the raw lens's predicted log-odds changes miss by
+3.9–6.6 nats (mean absolute error on test). That is worse than predicting the
+train mean (3.0–4.1). The tuned lens misses by 1.8–4.0. After calibration both
+lenses beat the null predictor at layers 2–11, and the tuned lens also at
+layer 1. With the donor's own top-1 token as the target (secondary), the
+tuned lens is better at every layer 0–11.
+
+**Where it does not hold: norm-matched random patches.** A random push of the
+same norm as the donor's moves GPT-2's output much less: the null MAE is
+0.5–1.5 nats against 3.0–4.3 for donor patches. Neither lens predicts those
+effects well. After calibration, the raw lens beats the null only at layers 9
+and 11. For the clean target the tuned lens does at 7, 9, 10 and 11, and for
+the donor target at 6, 7 and 8. In rank correlation the tuned lens is better
+at layers 1, 2 and 10 for the clean target. For the donor target it is
+**worse** than the raw lens at layers 0, 1 and 11 (intervals entirely below 0).
+So the tuned lens's advantage belongs to patches that write another real
+state into the residual stream. It does not extend to arbitrary directions of
+the same size.
+
+**What this licenses** (docs/validity.md). On GPT-2 small, for last-position
+residual replacement with a same-position state from another State of the
+Union excerpt, the tuned lens's readout change anticipates the change in the
+model's own final log-odds better than the raw lens's at most intermediate
+layers, in rank and in scale. Both lenses remain **readout diagnostics**. A
+better prediction of patch effects is not the model's belief at that layer.
+The patches show **sufficiency** under these conditions, not the mechanism
+that normally produces the output. The random-direction result says the
+lens's predictive validity does not carry over to off-distribution states.
+
+**Caveats.**
+- **One model, one corpus, one position, top-1 targets, 40 test documents.**
+  Under the planning assumptions, a per-layer "not distinguishable" leaves a
+  difference of about 0.2–0.3 undetected.
+- **The tuned lens names another GPT-2 revision.** It records
+  `base_model_revision` `e7da7f22…`, not the `607a30d7…` it was applied to. On
+  the hub, every weight file (`model.safetensors`, `pytorch_model.bin`,
+  `flax_model.msgpack`, …) has the same byte size at both commits. That is
+  consistent with identical weights, but it was not checked by content hash.
+- **The lens revision was not pinned in advance.** The Space's main resolved
+  to `1ac72858…`. `evidence.yml` now passes `--lens-revision` with that commit,
+  so a re-run reads the same lens.
+
 ### Running it
 
     pip install -r requirements.lock --extra-index-url https://download.pytorch.org/whl/cpu

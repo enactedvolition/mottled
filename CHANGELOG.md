@@ -16,8 +16,16 @@
   Design, hypothesis, decision rules and sample size were committed in
   `experiments/README.md` before any GPT-2 number from it existed. The run
   fails unless the self-patch is exactly zero and the last-layer positive
-  control holds. Results pending; a null or reversed result will be
-  reported as prominently as a positive one.
+  control holds.
+- **Result (Evidence run 39001132978, controls passed).** The registered
+  hypothesis holds pooled over layers 1–11: ρ_tuned − ρ_raw = +0.124
+  [+0.056, +0.204]. It holds at 8 of 11 layers and is not distinguishable at
+  2, 3 and 11. The tuned lens also predicts the scale (calibration slope
+  0.75–1.03 against the raw lens's 0.13–0.52). It does **not** carry over to
+  norm-matched random patches: there neither lens predicts much, and for the
+  donor-token target the tuned lens ranks worse at layers 0, 1 and 11. The
+  summary is committed byte-identical to the run's output, and
+  `experiments/README.md` has the table and caveats.
 
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
