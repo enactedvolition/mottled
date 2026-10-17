@@ -201,6 +201,24 @@ def summarize(traj: StateTrajectory, coords: np.ndarray, token: int = -1) -> dic
     return out
 
 
+# Where each `summarize` metric is measured, printed beside its number. A
+# projected path's length and turning are properties of the picture (another
+# projection draws another path); the rest are measured on the full hidden
+# states or on the readout's distributions. Unlabelled, a bare list puts them
+# on one footing.
+SPACE = {
+    "trajectory_length": "projection",
+    "integrated_curvature": "projection",
+    "avg_layer_cosine_drift": "hidden space",
+    "avg_layer_displacement": "hidden space",
+    "final_vector_norm": "hidden space",
+    "nn_stability": "hidden space",
+    "avg_attn_share": "hidden space",
+    "entropy_collapse": "readout",
+    "final_entropy": "readout",
+}
+
+
 METRICS = {
     "trajectory_length": lambda traj, coords, token=-1: path_length(coords[:, int(token) % traj.n_tokens, :]),
     "integrated_curvature": lambda traj, coords, token=-1: integrated_curvature(coords[:, int(token) % traj.n_tokens, :]),

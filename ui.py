@@ -733,7 +733,12 @@ def main() -> None:
         with st.expander("Research metrics", expanded=False):
             summary = metrics_mod.summarize(traj, result["coords"], token=token)
             for name, value in summary.items():
-                st.write(f"{name.replace('_', ' ')}: **{value:.3f}**")
+                space = metrics_mod.SPACE.get(name, "unlabelled")
+                st.write(f"{name.replace('_', ' ')} *({space})*: **{value:.3f}**")
+            st.caption("*projection* metrics measure the picture: another projection "
+                       "draws another path. *hidden space* metrics are measured on the "
+                       "full-dimensional states, *readout* metrics on the lens's "
+                       "output distributions.")
 
         gen_rec = traj.meta.get("generation")
         if isinstance(gen_rec, dict) and gen_rec.get("steps"):

@@ -60,6 +60,20 @@ def test_branch_divergence():
     assert np.allclose(M.branch_divergence(a, b), np.arange(5.0))
 
 
+def test_every_summary_metric_names_its_space():
+    """A projected path length beside a hidden-space distance, unlabelled,
+    reads as two measurements of the model; one is a measurement of the
+    picture."""
+    from projection import project
+
+    traj = synthetic.capture("the capital of france is paris", capture_components=True)
+    coords, _ = project(traj.hidden)
+    out = M.summarize(traj, coords, token=-1)
+    assert set(out) <= set(M.SPACE)
+    assert {k for k, v in M.SPACE.items() if v == "projection"} == {
+        "trajectory_length", "integrated_curvature"}
+
+
 def test_summary_on_tiny_model():
     from projection import project
 

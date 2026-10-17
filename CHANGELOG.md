@@ -10,6 +10,11 @@
   hidden space, not of meaning. The key reached no file format, analysis
   record or CLI output, only the explorer's panel, so it was renamed rather
   than kept alongside.
+- **Each research metric names its space.** The explorer's *Research
+  metrics* panel printed a projected path's length and curvature beside
+  hidden-space measurements as bare numbers. Each line now says where it was
+  measured — *projection*, *hidden space* or *readout* (`metrics.SPACE`) —
+  and a caption says that the projection ones measure the picture.
 
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
