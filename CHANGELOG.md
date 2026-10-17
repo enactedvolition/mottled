@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Review fixes: what the trust signals measure, and what metrics are called
+- **Renamed:** `metrics.semantic_drift` is now `metrics.layer_cosine_drift`,
+  and the research-metrics key `avg_semantic_drift` is now
+  `avg_layer_cosine_drift` (the explorer's label follows). It is the cosine
+  distance between consecutive layers' states — a change of direction in
+  hidden space, not of meaning. The key reached no file format, analysis
+  record or CLI output, only the explorer's panel, so it was renamed rather
+  than kept alongside.
+
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
   layer but the last through the published tuned lens for the model

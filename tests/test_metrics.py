@@ -43,7 +43,7 @@ def test_layer_displacement_and_drift():
     disp = M.layer_displacement(h)
     assert disp.shape == (2, 2)
     assert disp[0] == pytest.approx(2.0)
-    drift = M.semantic_drift(np.array([[[1.0, 0.0]], [[0.0, 1.0]]]))
+    drift = M.layer_cosine_drift(np.array([[[1.0, 0.0]], [[0.0, 1.0]]]))
     assert drift[0, 0] == pytest.approx(1.0)  # orthogonal vectors: drift 1
 
 
@@ -66,10 +66,11 @@ def test_summary_on_tiny_model():
     traj = synthetic.capture("the capital of france is paris")
     coords, _ = project(traj.hidden)
     out = M.summarize(traj, coords, token=-1)
-    expected = {"trajectory_length", "integrated_curvature", "avg_semantic_drift",
+    expected = {"trajectory_length", "integrated_curvature", "avg_layer_cosine_drift",
                 "avg_layer_displacement", "final_vector_norm", "entropy_collapse",
                 "final_entropy", "nn_stability"}
     assert expected <= set(out)
+    assert "avg_semantic_drift" not in out    # validity.md: not a semantic measure
     assert all(np.isfinite(v) for v in out.values())
     # `entropy_collapse` is first-layer minus last-layer entropy. The old
     # version of this test asserted it was positive, which held only because
