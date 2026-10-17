@@ -14,6 +14,7 @@ picture is trustworthy and where it is not.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -241,29 +242,56 @@ def neighborhood_preservation(X: np.ndarray, Y: np.ndarray, k: int = 10,
     return out
 
 
-# Below this neighborhood-preservation score a state is drawn where the
-# projection *could* put it rather than where it is. One home for the
-# threshold: it drives the explorer's prose, the ✕ markers on the scene, and
-# the viewer's scene panel, which would otherwise disagree about the same run.
+# Below this a state is drawn where the projection *could* put it rather than
+# where it is. One home for the threshold: it drives the explorer's prose, the
+# ✕ markers on the scene, and the viewer's scene panel, which would otherwise
+# disagree about the same run.
+#
+# The within-layer score is cut at its chance level, k / (T - 1): a state is
+# flagged when it keeps no more of its within-layer neighbors than a random
+# placement would. That is derived, not chosen. A plain 0.5 cannot serve
+# there: with k = 5 chance is at or above 0.5 for every prompt of 11 tokens
+# or fewer, so it flagged nothing at 7 tokens, not even a projection with
+# every layer shuffled. A cut halfway from chance to 1 (PR #62 as first
+# written) saturates. Flag rates, PCA / random / every layer shuffled, on the
+# tiny test model (k = 5, 3 weight seeds, 10 random maps and 10 shuffles
+# each; GPT-2 not measured here):
+#
+#     tokens     7         10        13        16        24        32
+#     chance   47/78/91   4/27/47  22/51/77  12/27/52  39/53/80  18/24/51
+#     halfway  47/78/91  33/74/91  57/86/98  69/93/99  86/98/100 74/84/99
+#
+# LOW_FIDELITY is the cut for a score with no chance level: the pooled
+# fallback and older scenes, read exactly as before.
 LOW_FIDELITY = 0.5
 
 
-def fidelity_summary(preservation, low_fidelity: float = LOW_FIDELITY) -> dict:
+def low_fidelity_cut(chance: float = 0.0, low_fidelity: float = LOW_FIDELITY) -> float:
+    """The preservation below which a state is flagged: the score's chance
+    level when it has one (within-layer), else the plain `low_fidelity`."""
+    return chance if chance > 0 else low_fidelity
+
+
+def fidelity_summary(preservation, low_fidelity: float = LOW_FIDELITY,
+                     chance: float = 0.0) -> dict:
     """How much of the neighborhood structure survived the projection.
 
     One computation, two surfaces: the Streamlit explorer's inline note and
     the web viewer's scene panel (`viewer/reading.js`, pinned by
     `tests/test_reading_conformance.py`). A scene that reports one fidelity in
     the app and another in the browser is two tools, and a screenshot from
-    either says nothing about the other.
+    either says nothing about the other. `low_fidelity` in the result is the
+    cut actually applied (`low_fidelity_cut`).
     """
     arr = np.asarray(preservation, dtype=np.float64).ravel()
     if arr.size == 0:
         raise ValueError("no preservation values to summarize")
+    cut = low_fidelity_cut(chance, low_fidelity)
     return {
         "mean": float(arr.mean()),
-        "low_fraction": float((arr < low_fidelity).mean()),
-        "low_fidelity": float(low_fidelity),
+        "low_fraction": float((arr < cut).mean()),
+        "low_fidelity": float(cut),
+        "chance": float(chance),
         "n": int(arr.size),
     }
 
@@ -274,9 +302,11 @@ def per_layer_preservation(hidden: np.ndarray, coords: np.ndarray, k: int = 5,
     searched among that layer's T states only, in hidden and projected space.
 
     This is the reading the pooled score is usually taken to give ("is the
-    local structure *at this depth* intact?"). On GPT-2 small the pooled score
-    cannot tell PCA from a random projection while this one can
-    (fidelity_experiment.py). k is clipped to T-1 per layer.
+    local structure *at this depth* intact?"). On GPT-2 small (8 prompts, 13
+    layers; measured for PR #49, commit 508e522) the pooled score ranks a
+    random projection above PCA (0.339 vs 0.318, chance 0.050) while this one
+    ranks them correctly (PCA 0.550, random 0.447, chance 0.345). k is clipped
+    to T-1 per layer.
     """
     hidden = np.asarray(hidden)
     coords = np.asarray(coords)
@@ -293,6 +323,42 @@ def preservation_chance(n: int, k: int) -> float:
     the other n-1 points: k / (n - 1)."""
     k = int(min(k, n - 1))
     return 1.0 if k < 1 else k / (n - 1)
+
+
+class FidelityBasis(NamedTuple):
+    """The per-state preservation the low-fidelity flag reads, and what it is."""
+
+    values: np.ndarray      # (L, T)
+    metric: str             # "within-layer" | "pooled"
+    k: int | None
+    chance: float           # what a random placement keeps; 0.0 for pooled (see below)
+
+
+def fidelity_basis(quality) -> FidelityBasis:
+    """What the trust signal reads: within-layer preservation, the worse of
+    euclidean and cosine, wherever it can discriminate; the pooled score only
+    where it cannot.
+
+    The pooled score mixes in cross-layer neighbors, so on GPT-2 it ranks a
+    random projection above PCA (`per_layer_preservation`): flags driven by it
+    err toward trusting a scrambled picture. The worse of the two metrics,
+    because a state whose neighbors survive by one and not the other has not
+    kept its neighborhood. The within-layer score cannot discriminate when a
+    layer has fewer than k + 2 states: k clips to T - 1, every other state is
+    a neighbor, and any projection scores 1.0 (chance is 1). There, and when
+    it was not computed, the pooled score stands in, with the plain cut
+    (chance 0) it has always had — all an older scene, which carries no k,
+    lets the viewer apply either.
+    """
+    per_layer = getattr(quality, "per_layer", None)
+    chance = getattr(quality, "chance_layer", None)
+    if per_layer is not None and chance is not None and chance < 1.0:
+        cosine = getattr(quality, "per_layer_cosine", None)
+        values = per_layer if cosine is None else np.minimum(per_layer, cosine)
+        return FidelityBasis(np.asarray(values), "within-layer",
+                             int(quality.k_layer), float(chance))
+    return FidelityBasis(np.asarray(quality.preservation), "pooled",
+                         getattr(quality, "k", None), 0.0)
 
 
 def projection_quality(

@@ -28,6 +28,7 @@ from typing import Any, BinaryIO, Iterator
 
 import numpy as np
 
+from projection import fidelity_basis
 from trajectory import StateTrajectory
 
 MAGIC = b"MTRJ"
@@ -333,6 +334,16 @@ def save_scene(result: dict, path_or_fh) -> None:
         if i < len(qualities) and qualities[i] is not None:
             run["quality"] = w.add(f"run{i}.quality",
                                    qualities[i].preservation.astype(np.float32))
+            basis = fidelity_basis(qualities[i])
+            if basis.metric == "within-layer":
+                # what the low-fidelity flag reads, with the chance level its
+                # cut is measured from. `quality` keeps meaning the pooled
+                # score; this is additive, and a run too short for a
+                # within-layer score omits it (readers fall back to `quality`)
+                run["layer_fidelity"] = {
+                    "preservation": w.add(f"run{i}.layer_fidelity",
+                                          basis.values.astype(np.float32)),
+                    "k": basis.k, "chance": basis.chance}
         if traj.attention is not None:
             run["attention"] = w.add(f"run{i}.attention", traj.attention.astype(np.float32))
         if traj.topk is not None:
@@ -433,6 +444,9 @@ def load_scene(path_or_fh) -> dict:
         for run in manifest["runs"]
     ]
     for run in scene["runs"]:
+        lf = run.get("layer_fidelity")
+        if isinstance(lf, dict) and lf.get("preservation") in arrays:
+            run["layer_fidelity"] = {**lf, "preservation": arrays[lf["preservation"]]}
         if isinstance(run.get("inspector"), dict):
             run["inspector"] = {
                 **run["inspector"],

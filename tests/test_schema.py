@@ -30,7 +30,9 @@ def _errors(raw: bytes, strict=False):
 @pytest.fixture(scope="module")
 def scene_bytes():
     cfg = MarbleConfig(model="tiny", use_cache=False, density_bootstrap=0)
-    trajs = [tiny.capture(p) for p in ("the cat sat on the mat", "hello world")]
+    # nine tokens and two: one run carries `layer_fidelity`, one is too short to
+    trajs = [tiny.capture(p) for p in ("the quick brown fox jumps over the lazy dog",
+                                       "hello world")]
     buf = io.BytesIO()
     statefile.save_scene(project_trajectories(cfg, trajs), buf)
     return buf.getvalue()
@@ -132,6 +134,10 @@ def test_nan_in_a_manifest_is_an_error(scene_bytes):
     (lambda m: m["arrays"]["terrain.x"].update(offset=3), "arrays['terrain.x']", "multiple of 16"),
     (lambda m: m["arrays"]["terrain.x"].update(length=4), "arrays['terrain.x']", "length 4"),
     (lambda m: m["runs"][0].update(tokens=["only-one"]), "runs[0].entropy", "tokens"),
+    (lambda m: m["runs"][0]["layer_fidelity"].update(preservation="run0.points"),
+     "runs[0].layer_fidelity.preservation", "tokens"),
+    (lambda m: m["runs"][0]["layer_fidelity"].update(chance="half"),
+     "runs[0].layer_fidelity.chance", "must be number"),
     (lambda m: m.pop("runs"), "manifest", "missing required field 'runs'"),
     (lambda m: m.update(version=2), "version", "must be 1"),
     (lambda m: m.update(kind="mystery"), "kind", "unknown kind"),
