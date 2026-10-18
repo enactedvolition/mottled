@@ -495,6 +495,11 @@ def load_model(name, revision, device, dtype):
     model = AutoModelForCausalLM.from_pretrained(name, revision=revision,
                                                  dtype=getattr(torch, dtype))
     resolved = getattr(model.config, "_commit_hash", None)
+    if resolved is None and revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
+        # transformers 5.20 no longer sets _commit_hash; a full commit SHA is
+        # immutable on the hub, so files fetched by it are that commit's
+        resolved = revision
+        model.config._commit_hash = revision
     if revision is not None and resolved != revision:
         raise ValueError(f"{name} at revision {revision} resolved to commit {resolved}")
     return model.to(device).eval(), tok
