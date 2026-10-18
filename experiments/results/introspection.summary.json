@@ -1,0 +1,275 @@
+{
+ "H1": "not supported",
+ "accuracy": {
+  "trained/identify/concept": {
+   "ci95": [
+    0.18125,
+    0.28625
+   ],
+   "n": 800,
+   "point": 0.2325
+  },
+  "trained/identify/none": {
+   "ci95": [
+    0.18125,
+    0.28625
+   ],
+   "n": 800,
+   "point": 0.2325
+  },
+  "trained/localize/concept": {
+   "ci95": [
+    0.89125,
+    1.0
+   ],
+   "n": 800,
+   "point": 0.95375
+  },
+  "trained/localize/none": {
+   "ci95": [
+    0.18375,
+    0.29
+   ],
+   "n": 800,
+   "point": 0.235
+  },
+  "trained/localize/random": {
+   "ci95": [
+    0.3525,
+    0.476281
+   ],
+   "n": 800,
+   "point": 0.415
+  },
+  "trained/prime/concept": {
+   "ci95": [
+    0.205,
+    0.317531
+   ],
+   "n": 800,
+   "point": 0.26
+  },
+  "trained/prime/none": {
+   "ci95": [
+    0.205,
+    0.317531
+   ],
+   "n": 800,
+   "point": 0.26
+  },
+  "untrained/identify/concept": {
+   "ci95": [
+    0.195,
+    0.295031
+   ],
+   "n": 800,
+   "point": 0.24625
+  },
+  "untrained/identify/none": {
+   "ci95": [
+    0.198719,
+    0.29375
+   ],
+   "n": 800,
+   "point": 0.245
+  },
+  "untrained/localize/concept": {
+   "ci95": [
+    0.15625,
+    0.250031
+   ],
+   "n": 800,
+   "point": 0.20125
+  },
+  "untrained/localize/none": {
+   "ci95": [
+    0.206219,
+    0.315
+   ],
+   "n": 800,
+   "point": 0.25875
+  },
+  "untrained/localize/random": {
+   "ci95": [
+    0.18375,
+    0.2925
+   ],
+   "n": 800,
+   "point": 0.23625
+  },
+  "untrained/prime/concept": {
+   "ci95": [
+    0.195,
+    0.308781
+   ],
+   "n": 800,
+   "point": 0.2525
+  },
+  "untrained/prime/none": {
+   "ci95": [
+    0.185,
+    0.3
+   ],
+   "n": 800,
+   "point": 0.24125
+  }
+ },
+ "config": {
+  "calibration": {
+   "0.25": 0.0,
+   "0.5": 0.0333333,
+   "1.0": 0.0,
+   "2.0": 0.0,
+   "4.0": 0.0
+  },
+  "layer": 19,
+  "lora": {
+   "alpha": 32,
+   "lr": 0.0001,
+   "rank": 16,
+   "seed": 0,
+   "steps_per_update": 8
+  },
+  "magnitude": 278.628,
+  "median_norm": 69.6569,
+  "n_test_docs": 40,
+  "n_train_docs": 40,
+  "n_train_items": 2396,
+  "skipped": {
+   "test/identify": 0,
+   "test/localize": 0,
+   "test/prime": 0,
+   "train/identify": 2,
+   "train/localize": 2
+  },
+  "strength": 4.0,
+  "test_concepts": [
+   "umbrella",
+   "bicycle",
+   "glacier",
+   "jungle",
+   "penguin",
+   "apple",
+   "volcano",
+   "piano",
+   "thunder",
+   "tiger",
+   "pumpkin",
+   "desert",
+   "saxophone",
+   "garden",
+   "castle",
+   "spider",
+   "origami",
+   "kangaroo",
+   "camera",
+   "snowman"
+  ],
+  "train_concepts": [
+   "guitar",
+   "octopus",
+   "violin",
+   "feather",
+   "cookie",
+   "dragon",
+   "banana",
+   "crystal",
+   "whale",
+   "tornado",
+   "chocolate",
+   "pyramid",
+   "robot",
+   "zebra",
+   "butterfly",
+   "pirate",
+   "island",
+   "waterfall",
+   "coffee",
+   "diamond",
+   "moon",
+   "honey",
+   "rainbow",
+   "mushroom",
+   "lemon",
+   "telescope",
+   "candle",
+   "rocket",
+   "cactus",
+   "lighthouse"
+  ]
+ },
+ "contrasts": {
+  "trained: identify concept - identify none": {
+   "above_zero": false,
+   "ci95": [
+    0.0,
+    0.0
+   ],
+   "point": 0.0
+  },
+  "trained: identify concept - prime concept": {
+   "above_zero": false,
+   "ci95": [
+    -0.100031,
+    0.0475
+   ],
+   "point": -0.0275
+  },
+  "trained: localize concept - localize random": {
+   "above_zero": true,
+   "ci95": [
+    0.4675,
+    0.610031
+   ],
+   "point": 0.53875
+  },
+  "training gain beyond priming": {
+   "above_zero": false,
+   "ci95": [
+    -0.125,
+    0.07625
+   ],
+   "point": -0.02125
+  },
+  "untrained: identify concept - identify none": {
+   "above_zero": false,
+   "ci95": [
+    -0.06125,
+    0.0625312
+   ],
+   "point": 0.00125
+  },
+  "untrained: identify concept - prime concept": {
+   "above_zero": false,
+   "ci95": [
+    -0.08375,
+    0.06875
+   ],
+   "point": -0.00625
+  },
+  "untrained: localize concept - localize random": {
+   "above_zero": false,
+   "ci95": [
+    -0.08625,
+    0.015
+   ],
+   "point": -0.035
+  }
+ },
+ "provenance": {
+  "corpus_sha256": "0e00dc3a326d362094e8c142418edbf6c1a5a42421ed9ecb6b3a108605b6d9a2",
+  "device": "xpu",
+  "dtype": "bfloat16",
+  "git_commit": "6f106fde7eae8a7122743883235424d102cbe308",
+  "model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "model_revision_requested": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+  "model_revision_resolved": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+  "torch": "2.14.1+xpu",
+  "transformers": "5.20.1"
+ },
+ "schema": "mottled-introspection-summary/1",
+ "train_loss_first_last": [
+  2.97575,
+  0.676222
+ ]
+}

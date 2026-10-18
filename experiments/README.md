@@ -532,6 +532,77 @@ Facts established after the plan was committed. None changes the design.
   next word. The smoke run's accuracies (20 items per cell, 60 training
   items) are not results and are not reported.
 
+### Result of the registered run
+
+**Run.** 2026-10-18, 00:31–04:01 PT (12,586 s, of which training 8,204 s), on an Intel Arc 140V (XPU, bfloat16),
+torch 2.14.1+xpu, transformers 5.20.1, commit `6f106fd`, model revision
+`989aa798…` as registered. Strength 4 (|v| = 278.6, median norm 69.66 at
+state 19) by the registered fallback. 2,396 training items, 300 updates.
+The committed
+[`results/introspection.summary.json`](results/introspection.summary.json)
+is the run's `summary.json` byte for byte: sha256 `63b25965…ee4ee4` (4,656
+bytes), the hash the run printed. The full `results.json` (2,069,722 bytes,
+sha256 `e3dfe972…4ef7c0`) stays on the run machine. A separate script
+recounted every accuracy from its 11,200 per-trial records and matched all
+14 to the summary.
+
+**H1: not supported.** Held-out concepts and passages, 800 trials per cell,
+crossed-bootstrap 95% intervals:
+
+| Condition | Untrained | Trained |
+|---|---|---|
+| identify, concept written | 0.246 [0.195, 0.295] | 0.233 [0.181, 0.286] |
+| identify, nothing written | 0.245 [0.199, 0.294] | 0.233 [0.181, 0.286] |
+| prime, concept written | 0.253 [0.195, 0.309] | 0.260 [0.205, 0.318] |
+| localize, concept written | 0.201 [0.156, 0.250] | **0.954 [0.891, 1.000]** |
+| localize, norm-matched random | 0.236 [0.184, 0.293] | 0.415 [0.353, 0.476] |
+| localize, nothing written | 0.259 [0.206, 0.315] | 0.235 [0.184, 0.290] |
+
+The two H1 differences on the trained model: identify concept − identify
+none = 0.000 [0.000, 0.000]; identify concept − prime concept = −0.028
+[−0.100, +0.048]. Training gain beyond priming: −0.021 [−0.125, +0.076].
+
+**Why the first interval is exactly zero.** After training, the model
+answered "D" to all 800 identification items with the concept written, all
+800 with nothing written, and all 800 priming items; and "4" to all 800
+localization items with nothing written. Its identification answers do not
+depend on the written vector at all. 23.3% is the share of items whose
+correct slot happens to be D (186 of 800).
+
+**What it did learn: where, not what.** Localization of a held-out
+concept's vector went from chance (0.201) to 0.954; the trained model's
+answers spread over all four parts (187 / 211 / 177 / 225). A norm-matched
+random vector is localized far less often (0.415; difference +0.539
+[+0.468, +0.610]), and most random-vector answers are "4" (656 of 800),
+the same answer it gives when nothing is written. So the learned readout is
+not a generic norm or anomaly detector: it responds to these mean-difference
+concept directions much more than to random directions of the same size.
+Whether it responds to *which* concept is answered by identification,
+and there the answer is no.
+
+**What this licenses** (docs/validity.md). On Qwen2.5-1.5B-Instruct, after
+one pass of LoRA training at this layer and strength, the model reports
+**where** in a passage a held-out concept direction was written, at 95%,
+and does not report **which** concept it was. A written vector shows
+sufficiency under these conditions; this is not evidence about how the
+model represents or reports its unperturbed states.
+
+**Caveats.**
+- **Identification collapsed to one letter**, so this run cannot say
+  whether identification is learnable here with more training, a lower
+  learning rate, or training on identification alone. Localization was
+  learned first and the loss summed both tasks; the losses were not logged
+  per task.
+- **The strength rule failed its own criterion** (see notes above), so the
+  injected vector is four times the median state norm. It is possible that
+  a vector this large is easy to locate and hard to name.
+- **The concept directions share structure.** Each is the "Tell me about
+  {c}." state minus the train-concept mean, so held-out directions may
+  share a common component the localizer keys on. The random control shows
+  the readout is direction-specific; it does not show it is concept-specific.
+- **One model, one layer, one strength, one seed.** No safety evaluation was
+  run on this adapter (registered gap).
+
 ## Corpus provenance
 
 `sotu_corpus.jsonl` is derived from the npm package
