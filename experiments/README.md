@@ -12,6 +12,7 @@ until the research requirements settle. Run from the repository root
 | `lens_patch_predictiveness.py` | Do raw/tuned lens readouts anticipate patch effects? (pre-registered below) |
 | `sotu_corpus.jsonl` | 80 State of the Union excerpts, the experiment's corpus |
 | `make_sotu_corpus.py` | Rebuilds `sotu_corpus.jsonl` from the npm package, byte for byte |
+| `introspection.py` | Can a model learn to report a concept written into its residual stream? (pre-registered below) |
 
 ## `patching.py`
 
@@ -354,6 +355,157 @@ lens of random translators (machinery only — its numbers mean nothing).
 `pytest -m network tests/test_patching.py` checks the self-patch identity and
 the last-layer control on real GPT-2 at the pinned revision in seconds, as a
 preflight for the full run.
+
+## `introspection.py` — pre-registered analysis plan
+
+Registered in the commit that added this file, before any number from a real
+model existed. Changes after that commit go under *Deviations* with reasons.
+
+### Question
+
+Prior work trained models to detect and name concept vectors added to their
+residual stream (Steering Awareness, arXiv 2511.21399; Introspection
+Fine-Tuning, arXiv 2607.14111). Two things those designs leave open:
+whether a model that "names the injected concept" is reading its own state
+or is just *primed* toward that word, and whether yes/no detection measures
+anything (IFT replaced it for that reason). This run asks: after LoRA
+training on train concepts, does a small model name a **held-out** concept
+written into its residual stream over a **held-out** passage more often
+than (a) when nothing is written and (b) it picks that same concept when
+asked a question the injection should not answer?
+
+### Design
+
+**Model.** `Qwen/Qwen2.5-1.5B-Instruct` (Apache-2.0, ungated), revision
+`989aa7980e4cf806f80c7fef2b1adb7bc71aa306` (the hub's commit on 2026-10-18);
+the run refuses any other resolution. Device and dtype are recorded; the
+planned run is bfloat16 on an Intel Arc 140V (XPU).
+
+**Concepts.** 50 concrete nouns (`CONCEPTS`). Ranked by
+`sha256("mottled-introspection-v1:concept:" + word)`: the first 30 train,
+the last 20 test. The list is a design choice, not data: every trial's
+ground truth is the vector the experimenter wrote.
+
+**Passages.** `sotu_corpus.jsonl` (public domain; provenance below), checked
+by SHA-256. Documents sorted by id, even rank train (40) and odd rank test
+(40), as in `lens_patch_predictiveness`. Each passage is the excerpt's first
+100 whitespace words, in 4 numbered parts of 25.
+
+**Items.** Every (document, concept) cell of a split, per task. A cell whose
+passage contains the concept (word-boundary, case-insensitive) is skipped
+and counted, never re-drawn. Identification and priming items list four
+concepts from the same split: the item's concept and three distractors, none
+in the passage, chosen and slotted by hash. Counts with the registered
+corpus: 800 test items per task, none skipped; 1,198 train items per task,
+2 skipped.
+
+**Concept directions.** At the injection layer, the state at the last
+position of the chat-templated prompt "Tell me about {c}." minus the mean of
+that state over the 30 **train** concepts, unit-normalised. Held-out
+concepts never shape a training vector.
+
+**Injection.** Added to the residual stream (`capture.HookCapture` write
+hook) at state index round(2/3 · blocks) — 19 of 28 for this model — over the
+passage tokens: all four parts for identification and priming, one part
+(chosen by hash) for localization. Magnitude = strength × the median
+residual norm at that layer over passage tokens of 10 train documents.
+
+**Strength rule.** The smallest s in {0.25, 0.5, 1, 2, 4} at which writing a
+train concept over the user turn "Say one word." puts that word's first token
+in the untrained model's top-10 next tokens for at least half of the train
+concepts; 4 if none does. Train concepts and a prompt outside the tasks only.
+
+**Tasks** (the answer is read from the model's next-token logits over the
+four labels, no sampling; prediction = argmax):
+
+- *identify*: "a concept may have been injected directly into your internal
+  activations. Which concept was it?" Options A–D.
+- *localize*: "... in one of the 4 parts. Which part was it injected into?"
+  Answers 1–4.
+- *prime* (control): "Which of these words appears in the passage?" Same
+  A–D concepts, none of which is in the passage.
+
+**Conditions** on test items: identify × {concept, none}; localize ×
+{concept, norm-matched random, none}; prime × {concept, none}. The random
+direction is seeded by hash and has the concept vector's norm.
+
+**Training.** LoRA (r = 16, α = 32, no dropout) on every q/k/v/o and
+gate/up/down projection; one pass over the 2,396 train identify and localize
+items (train concepts × train documents) in a seeded order; 4-way
+cross-entropy over the answer labels; AdamW, lr 1e-4, 8 items per update.
+Priming items are never trained on.
+
+**Evaluation.** Every condition, on the untrained model and again on the
+trained one. Test concepts × test documents only.
+
+### Hypothesis and decision rule
+
+**H1 (primary).** On the trained model, on held-out concepts and passages,
+identification accuracy with the concept written exceeds both:
+
+1. identification accuracy with nothing written, and
+2. the rate at which the prime question picks the written concept.
+
+Uncertainty: crossed bootstrap — the 20 test concepts and the 40 test
+documents resampled independently with replacement, B = 2000, seed 0, every
+statistic on the same draws. **Supported** if the 95% percentile interval of
+both differences lies above 0; otherwise **not supported**.
+
+Reported descriptively, with no confirmatory claim: every accuracy above for
+both stages; the training gain beyond priming ((identify − prime) trained
+minus untrained); localization concept vs random (if they are equal, the
+model is detecting an anomaly, not a concept); the identify/none and
+localize/none rates as the option-position bias floor; the calibration
+table; training losses.
+
+### Sample size
+
+Fixed by the corpus and concept list: 800 trials per cell in 20 × 40
+crossed clusters. Planning assumption, not a measurement: if per-concept
+accuracy has SD ≈ 0.2 across concepts, the concept term alone gives SE ≈
+0.045 on a difference, so differences of about 0.13 are detectable at 80%
+power. A "not supported" verdict means no difference of roughly that size
+was detected.
+
+### Interpretation (docs/validity.md)
+
+- An injection shows **sufficiency** under these conditions. A model that
+  names a written concept is reporting something present in its residual
+  stream; that is not evidence about how it reports its *unperturbed*
+  states, which this run does not test.
+- Beating the prime control rules out pure priming toward the written word;
+  it does not rule out every shortcut.
+- One model, one layer, one strength, one concept list, one corpus.
+
+### Known gaps, registered now
+
+- **Safety evaluation is not in this run.** Steering Awareness found
+  detection training made models easier to steer and more compliant with
+  harmful requests. No result from this run should be presented without
+  that evaluation on the same adapter.
+- **No cross-model control.** A second model cannot read these vectors
+  (different width); that control belongs to the natural-state phase.
+- **Natural states are the next phase**, with its own registration.
+- **Only mean-difference directions.** Steering Awareness found PCA/ICA
+  directions evaded detection; transfer across direction methods is untested.
+
+### Running it
+
+    python -m experiments.introspection --device xpu --dtype bfloat16 \
+        --out results.json --summary summary.json
+
+Needs `peft` in addition to `requirements.lock`. `main(argv, loaded=(model,
+tokenizer, letters, numbers))` runs everything but the download;
+`tests/test_introspection.py` uses it on a tiny model (machinery only — its
+numbers mean nothing). Pinned there: an unedited pass gives bit-identical
+answer logits to the model's own; a write in one part leaves every earlier
+position bit-identical at every layer; part masks cover exactly their part's
+tokens; no listed option is in its passage; LoRA training changes only
+adapter weights; the contrasts and verdict compute as stated here.
+
+### Deviations from the plan
+
+None so far.
 
 ## Corpus provenance
 

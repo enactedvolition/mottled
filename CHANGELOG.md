@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### A registered introspection experiment
+- **`experiments/introspection.py`** asks whether a model, after LoRA
+  training, names a held-out concept written into its residual stream over
+  a held-out passage more often than with nothing written, and more often
+  than a priming question picks that concept. Design, hypothesis, decision
+  rule and known gaps (no safety evaluation yet, no natural states) are in
+  `experiments/README.md`, committed before any real-model number. The write
+  is a `capture.HookCapture` edit; an unedited pass is bit-identical to the
+  model's own. `experiments/` is not packaged.
+
 ### Review fixes: what the trust signals measure, and what metrics are called
 - **The low-fidelity flag reads within-layer preservation.** The amber ✕
   markers, the explorer's fidelity header, the basin's trust sentence, and
