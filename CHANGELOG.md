@@ -11,6 +11,13 @@
   `experiments/README.md`, committed before any real-model number. The write
   is a `capture.HookCapture` edit; an unedited pass is bit-identical to the
   model's own. `experiments/` is not packaged.
+- **Result (Arc 140V, bfloat16, registered run): H1 not supported.** After
+  training, Qwen2.5-1.5B-Instruct answered "D" to every identification and
+  priming item, with or without a written vector (0.233 either way). It did
+  learn **where**: localization of held-out concept vectors rose from 0.201
+  to 0.954, against 0.415 for norm-matched random vectors. The summary is
+  committed byte-identical to the run's output; `experiments/README.md` has
+  the table and caveats.
 
 ### Review fixes: what the trust signals measure, and what metrics are called
 - **The low-fidelity flag reads within-layer preservation.** The amber ✕
