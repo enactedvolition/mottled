@@ -507,6 +507,31 @@ adapter weights; the contrasts and verdict compute as stated here.
 
 None so far.
 
+### Notes after registration
+
+Facts established after the plan was committed. None changes the design.
+
+- **Revision check.** transformers 5.20 no longer sets `config._commit_hash`,
+  so the run refused its own pinned revision. A full 40-hex commit is
+  immutable on the hub, so a run asked for one now records it as resolved
+  (commit `6f106fd`). The check still refuses any other resolution.
+- **Line endings.** On Windows with `core.autocrlf`, the corpus checked out
+  with CRLF and the SHA-256 check refused it, as it should. The registered
+  run uses a clone with `core.autocrlf false`; the corpus hash matches.
+  `experiments/introspection.py` in that clone differs from the commit only
+  in line endings (`git diff --ignore-cr-at-eol` is empty).
+- **Strength calibration did not reach its criterion.** A one-document smoke
+  run on the Arc 140V (bfloat16) measured, on train concepts only, top-10 hit
+  rates of 0, 0.03, 0, 0 and 0 at strengths 0.25–4 (median norm 69.8 at state
+  19). The registered fallback, strength 4 (|v| ≈ 279), applies. A follow-up
+  diagnostic on train concepts: writing over the user turn only did not put
+  the concept in the top 10 for any of 30 concepts at strengths up to 32;
+  writing over every position, including the one being predicted, broke the
+  output at strength 4 (non-English tokens). So at this layer, a concept
+  written over earlier positions does not by itself steer this model's
+  next word. The smoke run's accuracies (20 items per cell, 60 training
+  items) are not results and are not reported.
+
 ## Corpus provenance
 
 `sotu_corpus.jsonl` is derived from the npm package
