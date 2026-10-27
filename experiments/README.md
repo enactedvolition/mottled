@@ -13,6 +13,7 @@ until the research requirements settle. Run from the repository root
 | `sotu_corpus.jsonl` | 80 State of the Union excerpts, the experiment's corpus |
 | `make_sotu_corpus.py` | Rebuilds `sotu_corpus.jsonl` from the npm package, byte for byte |
 | `introspection.py` | Can a model learn to report a concept written into its residual stream? (pre-registered below) |
+| `evil_qwen_control.py` | Does a published two-neuron steering recipe (Qwen3.5-4B) beat random neurons at the same dose? Exploratory, not pre-registered |
 
 ## `patching.py`
 
