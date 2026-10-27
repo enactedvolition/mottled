@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-27
+
 ### A registered introspection experiment
 - **`experiments/introspection.py`** asks whether a model, after LoRA
   training, names a held-out concept written into its residual stream over
