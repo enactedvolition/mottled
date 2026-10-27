@@ -429,6 +429,16 @@ def _load_hub(model_id, revision, dtype):
     model = AutoModelForCausalLM.from_pretrained(
         model_id, revision=revision, dtype=getattr(torch, dtype)).eval()
     served = getattr(model.config, "_commit_hash", None)
+    if served is None:
+        # transformers >= 5.20 keeps no commit on the config; what it fetched
+        # for `revision` sits in the cache under the snapshot it resolved to
+        from pathlib import Path
+
+        from huggingface_hub import try_to_load_from_cache
+
+        hit = try_to_load_from_cache(model_id, "config.json", revision=revision)
+        if isinstance(hit, str):
+            served = Path(hit).parent.name
     assert served == revision, f"asked the hub for {model_id}@{revision}, got {served}"
     return model, tokenizer
 
