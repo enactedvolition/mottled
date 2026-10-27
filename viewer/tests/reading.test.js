@@ -49,6 +49,54 @@ test("scene fidelity pools states rather than averaging run means", () => {
   assert.ok(Math.abs(pooled.mean - 6 / 7) < 1e-9);
 });
 
+test("scene fidelity reads the within-layer score, cut against its own chance", () => {
+  // pooled `quality` says all is well; the within-layer score says otherwise,
+  // and is what the explorer's flag reads (projection.fidelity_basis)
+  const arr = (v) => ({ data: Float32Array.from(v), shape: [1, v.length] });
+  const run = { quality: arr([1, 1, 1, 1]),
+                layerFidelity: { preservation: arr([0.8, 0.4, 0.2, 1]), k: 5, chance: 0.4 } };
+  const f = R.sceneFidelity([run]);
+  assert.strictEqual(f.metric, "within-layer");
+  assert.ok(Math.abs(f.mean - 0.6) < 1e-6);
+  // the cut is chance itself: 0.2 is below it, 0.4 (at chance) is not
+  assert.strictEqual(f.low_fraction, 0.25);
+  assert.deepStrictEqual(f.low_fidelity, [0.4, 0.4]);
+  assert.deepStrictEqual(f.chance, [0.4, 0.4]);
+  assert.match(R.fidelityNote(f),
+               /within-layer.*random placement keeps 0\.4\b.*25% of states are no better than a random placement \(below chance 0\.4\)/);
+});
+
+test("an older scene falls back to pooled quality and says so", () => {
+  const f = R.sceneFidelity([{ quality: { data: Float32Array.from([0.9, 0.2]), shape: [1, 2] } }]);
+  assert.strictEqual(f.metric, "pooled");
+  assert.deepStrictEqual(f.low_fidelity, [0.5, 0.5]);
+  assert.strictEqual(f.chance, null);
+  assert.match(R.fidelityNote(f), /pooled across layers.*layer.*below 0\.5\)/);
+});
+
+test("a scene mixing long and short runs says it mixed the measures", () => {
+  const arr = (v) => ({ data: Float32Array.from(v), shape: [1, v.length] });
+  const f = R.sceneFidelity([
+    { quality: arr([1, 1]), layerFidelity: { preservation: arr([0.65, 0.9]), chance: 0.2 } },
+    { quality: arr([0.45, 0.9]) },
+  ]);
+  assert.strictEqual(f.metric, "mixed");
+  assert.strictEqual(f.n, 4);
+  // 0.65 vs chance 0.2: kept; 0.45 vs the plain 0.5: low
+  assert.strictEqual(f.low_fraction, 0.25);
+  assert.match(R.fidelityNote(f),
+               /pooled across layers for the rest.*random placement within a layer \(below chance 0\.2\), below 0\.5 where pooled/);
+});
+
+test("a within-layer score with no chance level keeps the plain cut", () => {
+  // a blast layout's quality: scored within each layer, no chance recorded
+  const q = { data: Float32Array.from([0.45, 0.55]), shape: [1, 2] };
+  const f = R.sceneFidelity([{ quality: q, layerFidelity: { preservation: q, k: null, chance: null } }]);
+  assert.strictEqual(f.metric, "within-layer");
+  assert.strictEqual(f.low_fraction, 0.5);
+  assert.doesNotMatch(R.fidelityNote(f), /random placement/);
+});
+
 test("a scene with no quality layer reports no fidelity rather than zero", () => {
   assert.strictEqual(R.sceneFidelity([{ label: "A" }]), null);
   assert.strictEqual(R.sceneSummary(scene({ quality: null })).fidelity, null);

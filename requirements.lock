@@ -1,5 +1,6 @@
 # requirements.lock — direct dependencies pinned to the exact versions the
-# test suite runs against (Python 3.11), for reproducible dev/CI installs.
+# test suite runs against (Python 3.11), for reproducible installs. ci.yml
+# installs requirements.txt's floors instead; evidence.yml installs this.
 # Transitive versions resolve normally; this pins the top-level surface the
 # code is verified on. Regenerate after bumping any dependency.
 #

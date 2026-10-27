@@ -70,7 +70,7 @@ class MarbleConfig:
     # density / terrain
     density: str = "kde"
     density_bootstrap: int = 24   # bootstrap resamples behind Landscape.density_se
-    # (the terrain confidence overlay); 0 disables uncertainty estimation
+    # (the terrain uncertainty overlay, a lower bound); 0 disables it
     grid_size: int = 64
     grid_padding: float = 0.2
     smooth_sigma: float = 1.5

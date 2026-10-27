@@ -116,6 +116,23 @@ def scene_schema() -> dict:
             "points": {**_REF, "description": "(trajectories, points, 3) draped paths"},
             "entropy": {**_REF, "description": "(layers, tokens)"},
             "quality": {**_REF, "description": "(layers, tokens) neighborhood preservation"},
+            "layer_fidelity": {
+                "type": "object",
+                "description": "what the low-fidelity flag reads "
+                               "(projection.fidelity_basis); absent when the run "
+                               "has too few tokens for it, and readers then fall "
+                               "back to `quality`",
+                "required": ["preservation"],
+                "properties": {
+                    "preservation": {**_REF, "description": "(layers, tokens) "
+                                     "within-layer neighborhood preservation, the "
+                                     "worse of euclidean and cosine"},
+                    "k": {"type": "integer", "minimum": 1},
+                    "chance": {"type": "number", "minimum": 0,
+                               "description": "k / (tokens - 1): what a random "
+                                              "placement keeps on average"},
+                },
+            },
             "attention": {**_REF, "description": "(layers-1, tokens, tokens)"},
             "topk": {"$ref": "#/$defs/topk"},
             "generation": {"type": "object"},
@@ -426,8 +443,12 @@ def _shape_checks(manifest, shapes, raw, start, arrays, P) -> list[Problem]:
             if not isinstance(run, dict):
                 continue
             T = len(run.get("tokens") or [])
-            for key in ("entropy", "quality"):
-                s = shapes.get(run.get(key)) if isinstance(run.get(key), str) else None
+            lf = run.get("layer_fidelity")
+            refs = [(key, run.get(key)) for key in ("entropy", "quality")]
+            refs.append(("layer_fidelity.preservation",
+                         lf.get("preservation") if isinstance(lf, dict) else None))
+            for key, ref in refs:
+                s = shapes.get(ref) if isinstance(ref, str) else None
                 if s is not None and (len(s) != 2 or s[1] != T):
                     out.append(P("error", f"runs[{i}].{key}",
                                  f"shape {s} is not (layers, {T} tokens)"))

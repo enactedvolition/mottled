@@ -161,3 +161,91 @@ def test_projection_quality_carries_per_layer_fields(hidden):
     assert q.per_layer.shape == (L, T) and q.per_layer_cosine.shape == (L, T)
     assert q.k_layer == min(5, T - 1)
     assert 0 < q.chance_layer <= 1
+
+
+# ---- the low-fidelity flag (fidelity_basis + low_fidelity_cut) ----------
+
+def test_the_cut_is_chance_within_a_layer_and_the_plain_one_without():
+    from projection import LOW_FIDELITY, low_fidelity_cut
+    assert low_fidelity_cut(0.0) == LOW_FIDELITY == 0.5     # pooled: as before
+    assert low_fidelity_cut(5 / 11) == 5 / 11               # no better than random
+
+
+def test_flag_reads_within_layer_and_falls_back_only_where_it_cannot_discriminate():
+    from projection import ProjectionQuality, fidelity_basis
+    rng = np.random.default_rng(0)
+    long = rng.normal(size=(5, 12, 16))
+    coords, proj = project(long)
+    q = projection_quality(long, coords, proj)
+    b = fidelity_basis(q)
+    assert b.metric == "within-layer" and b.k == 5 and b.chance == pytest.approx(5 / 11)
+    np.testing.assert_array_equal(b.values, np.minimum(q.per_layer, q.per_layer_cosine))
+
+    # Six tokens: k clips to T - 1, every other state is a neighbor, and the
+    # within-layer score is 1.0 whatever the projection did. It cannot be
+    # what the flag reads.
+    short = long[:, :6]
+    scrambled = rng.normal(size=(5, 6, 2))
+    q = projection_quality(short, scrambled)
+    assert (q.per_layer == 1).all() and q.chance_layer == 1
+    b = fidelity_basis(q)
+    assert b.metric == "pooled" and b.chance == 0.0
+    np.testing.assert_array_equal(b.values, q.preservation)
+
+    # a quality without within-layer fields (an older caller) reads pooled
+    bare = ProjectionQuality(preservation=np.ones((5, 6)), residual=None,
+                             explained_variance=None, k=10)
+    assert fidelity_basis(bare).metric == "pooled"
+
+
+def _flag_rate(hidden, coords, projector=None, chance_relative=True):
+    from projection import fidelity_basis, fidelity_summary
+    b = fidelity_basis(projection_quality(hidden, coords, projector))
+    return fidelity_summary(b.values, chance=b.chance if chance_relative else 0.0)["low_fraction"]
+
+
+def _three_ways(prompt):
+    """Flag rates for the tiny model's states under PCA, random Gaussian maps
+    to 2-D, and PCA's own points shuffled among the tokens of each layer
+    (layer separation intact, within-layer structure gone), over three sets
+    of weights."""
+    tiny = pytest.importorskip("tiny")
+    rates = {"pca": [], "random": [], "shuffled": [], "shuffled_plain": []}
+    for seed in (0, 1, 2):
+        H = np.asarray(tiny.capture(prompt, seed=seed).hidden, np.float64)
+        L, T, D = H.shape
+        Y, proj = project(H)
+        rates["pca"].append(_flag_rate(H, Y, proj))
+        for s in range(5):
+            R = np.random.default_rng(s).normal(size=(D, 2))
+            rates["random"].append(_flag_rate(H, (H.reshape(-1, D) @ R).reshape(L, T, 2)))
+        rng = np.random.default_rng(seed)
+        Z = np.stack([Y[l][rng.permutation(T)] for l in range(L)])
+        rates["shuffled"].append(_flag_rate(H, Z))
+        rates["shuffled_plain"].append(_flag_rate(H, Z, chance_relative=False))
+    return {k: np.asarray(v) for k, v in rates.items()}
+
+
+def test_flag_marks_a_random_projection_far_more_than_pca():
+    """The trust signal has to tell a projection that kept structure from one
+    that did not, without firing on most of the one that did. On a real
+    forward pass (the tiny model, 13 tokens, so k = 5 and the cut is chance,
+    5/12 = 0.42), measured: mean within-layer preservation PCA 0.64, random
+    0.48, shuffled 0.37; flagged PCA 22% (18-27%), random 53%, shuffled 79%
+    (70-84%). A cut halfway from chance to 1 flagged PCA 57%."""
+    r = _three_ways("the capital of france is paris and the capital of germany is berlin")
+    assert r["random"].mean() > r["pca"].mean() + 0.2
+    assert r["shuffled"].mean() > r["pca"].mean() + 0.4
+    assert r["shuffled"].min() > 0.6
+    assert r["pca"].max() < 0.35                 # PCA is not flagged wholesale
+
+
+def test_a_plain_cut_cannot_flag_a_short_prompt_and_the_chance_relative_one_can():
+    """Seven tokens: a random placement keeps 5/6 of its within-layer
+    neighbors on average, so a plain 0.5 cut flagged nothing at all, not even
+    PCA's points shuffled within every layer. Measured with the cut at
+    chance: PCA 47%, random 77%, shuffled 89% (78-97%)."""
+    r = _three_ways("the capital of france is paris and")
+    assert r["shuffled_plain"].max() == 0.0
+    assert r["shuffled"].min() > 0.7
+    assert r["random"].mean() > r["pca"].mean() + 0.2

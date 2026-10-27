@@ -1,5 +1,6 @@
-# Clone-install superset (core + all optional backends). Lower-bound floors;
-# see requirements.lock for the exact pinned closure used in CI.
+# Clone-install superset (core + all optional backends). Lower-bound floors,
+# and what ci.yml installs, so CI tests the latest releases they admit.
+# requirements.lock pins one known-good set; evidence.yml installs that.
 # The core five are enough to *read* a .mtj, analyse a trajectory or drive a
 # viewer; capture needs torch + transformers, because every capture is now a
 # real model (the synthetic backend was removed in 2e254fa).

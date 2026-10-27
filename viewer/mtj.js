@@ -153,6 +153,15 @@
       };
     };
 
+    const resolveLayerFidelity = (e, T) => {
+      if (!e || typeof e !== "object" || Array.isArray(e)) return null;
+      const p = typeof e.preservation === "string" ? arrays[e.preservation] || null : null;
+      if (!p || p.shape.length !== 2 || p.shape[1] !== T) return null;
+      const num = (x) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+      // (L, T) float32; chance = k / (T - 1), what a random placement keeps
+      return { preservation: p, k: num(e.k), chance: num(e.chance) };
+    };
+
     const t = manifest.terrain || {};
     const terrain = {
       x: resolve(t.x, "terrain.x"),
@@ -178,6 +187,11 @@
         points,
         entropy: r.entropy ? resolve(r.entropy, `run ${i} entropy`) : null,
         quality: r.quality ? resolve(r.quality, `run ${i} quality`) : null,
+        // optional: what the low-fidelity flag reads (projection.fidelity_basis)
+        // — within-layer preservation with its k and chance level. Absent
+        // from older scenes and from runs too short for it; reading.js then
+        // falls back to `quality`. Malformed reads null, like `features`.
+        layerFidelity: resolveLayerFidelity(r.layer_fidelity, (r.tokens || []).length),
         attention: r.attention ? resolve(r.attention, `run ${i} attention`) : null,
         topk: r.topk || null,
         // optional decode record (writers >= scene-v4): prompt/continuation

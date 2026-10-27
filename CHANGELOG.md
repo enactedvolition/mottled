@@ -2,7 +2,98 @@
 
 ## Unreleased
 
-## 0.3.0 — 2026-10-16
+## 0.3.0 — 2026-10-27
+
+### A registered introspection experiment
+- **`experiments/introspection.py`** asks whether a model, after LoRA
+  training, names a held-out concept written into its residual stream over
+  a held-out passage more often than with nothing written, and more often
+  than a priming question picks that concept. Design, hypothesis, decision
+  rule and known gaps (no safety evaluation yet, no natural states) are in
+  `experiments/README.md`, committed before any real-model number. The write
+  is a `capture.HookCapture` edit; an unedited pass is bit-identical to the
+  model's own. `experiments/` is not packaged.
+- **Result (Arc 140V, bfloat16, registered run): H1 not supported.** After
+  training, Qwen2.5-1.5B-Instruct answered "D" to every identification and
+  priming item, with or without a written vector (0.233 either way). It did
+  learn **where**: localization of held-out concept vectors rose from 0.201
+  to 0.954, against 0.415 for norm-matched random vectors. The summary is
+  committed byte-identical to the run's output; `experiments/README.md` has
+  the table and caveats.
+
+### Review fixes: what the trust signals measure, and what metrics are called
+- **The low-fidelity flag reads within-layer preservation.** The amber ✕
+  markers, the explorer's fidelity header, the basin's trust sentence, and
+  the viewer's reading panel and inspector all read neighborhood
+  preservation pooled across layers, which mixes in cross-layer neighbors:
+  on GPT-2 it ranks a random projection above PCA. They now read
+  within-layer preservation, the worse of euclidean and cosine
+  (`projection.fidelity_basis`), and name the measure they read. A run of
+  six tokens or fewer, where the within-layer score is 1.0 for any
+  projection, falls back to the pooled score and says so. The explorer's
+  "Neighborhood preservation per layer" chart, which plotted the pooled
+  score, now plots what the flag reads and is labelled with it.
+- **The within-layer flag is cut at chance.** A state is flagged when it
+  keeps no more of its within-layer neighbors than a random placement would:
+  below chance, k / (T − 1) (`projection.low_fidelity_cut`). A plain 0.5
+  cannot serve there: for prompts of 11 tokens or fewer chance is at or
+  above 0.5, and at 7 tokens it flagged nothing, not even a projection with
+  every layer shuffled. A cut halfway from chance to 1 saturated (tiny
+  model, 13 tokens: PCA 57% flagged); at chance it flags PCA 22%, random
+  projections 51% and the shuffle 77%. The mean against chance stays the
+  headline; the fraction counts states below chance. The pooled fallback,
+  and every older scene, keeps the plain `LOW_FIDELITY = 0.5` cut.
+- **`.mtj`: `runs[].layer_fidelity`** (additive, no version bump):
+  `{ "preservation" → (L, T), "k", "chance" }`, written when a run has the
+  within-layer score. `quality` keeps its meaning. The viewer prefers
+  `layer_fidelity` and falls back to `quality`, so the bundled samples,
+  written before it, report the same numbers as before, now labelled
+  "pooled across layers".
+- **Renamed:** `metrics.semantic_drift` is now `metrics.layer_cosine_drift`,
+  and the research-metrics key `avg_semantic_drift` is now
+  `avg_layer_cosine_drift` (the explorer's label follows). It is the cosine
+  distance between consecutive layers' states — a change of direction in
+  hidden space, not of meaning. The key reached no file format, analysis
+  record or CLI output, only the explorer's panel, so it was renamed rather
+  than kept alongside.
+- **Each research metric names its space.** The explorer's *Research
+  metrics* panel printed a projected path's length and curvature beside
+  hidden-space measurements as bare numbers. Each line now says where it was
+  measured — *projection*, *hidden space* or *readout* (`metrics.SPACE`) —
+  and a caption says that the projection ones measure the picture.
+- **The density SE is no longer called a confidence field.** `density.py`,
+  the README, `docs/mtj-format.md` and the viewer README described the
+  bootstrap SE as the terrain's confidence, and `docs/validity.md` as useful
+  for spotting bandwidth artifacts. It is neither: it treats dependent states
+  as independent (on the bundled GPT-2 scenes it is about a fifth of a block
+  bootstrap over token trajectories) and resamples at a near-fixed bandwidth
+  (doubling the bandwidth moves the terrain by more than two SE in 95% of
+  cells). The wording now says lower bound, and says what it cannot show.
+
+### Does a better lens predict what a patch does? (pre-registered)
+- **`experiments/patching.py`** overwrites the residual state at one site of
+  exact `input_ids` and returns the model's own final logits (not a lens),
+  clean and patched, with the state before and after and a provenance record
+  (resolved hub commit, dtype, ids, site, the written value's hash). A
+  self-patch is bit-identical; a revision that resolves to another commit is
+  refused. `experiments/` is not packaged, so none of this is public API.
+- **`experiments/lens_patch_predictiveness.py`** asks whether raw and tuned
+  lens readouts of a patched state anticipate the change in GPT-2's own
+  final log-odds, on 160 windows of 80 State of the Union excerpts
+  (`@stdlib/datasets-sotu@0.2.3`, public domain, committed with provenance).
+  Design, hypothesis, decision rules and sample size were committed in
+  `experiments/README.md` before any GPT-2 number from it existed. The run
+  fails unless the self-patch is exactly zero and the last-layer positive
+  control holds.
+- **Result (Evidence run 39001132978, controls passed).** The registered
+  hypothesis holds pooled over layers 1–11: ρ_tuned − ρ_raw = +0.124
+  [+0.056, +0.204]. It holds at 8 of 11 layers and is not distinguishable at
+  2, 3 and 11. The tuned lens also predicts the scale (calibration slope
+  0.75–1.03 against the raw lens's 0.13–0.52). It does **not** carry over to
+  norm-matched random patches: there neither lens predicts much, and for the
+  donor-token target the tuned lens ranks worse at layers 0, 1 and 11. The
+  summary is committed byte-identical to the run's output, and
+  `experiments/README.md` has the table and caveats.
 
 ### A tuned lens, and a raw lens that says it is biased
 - **`--lens tuned`** (`MarbleConfig.lens`, `tuned_lens.py`) reads every
@@ -69,6 +160,37 @@
   markup unescaped, a stored XSS via `?file=`; all are escaped, every scene value in markup is
   checked by a test, and `index.html` carries a Content-Security-Policy
   (`script-src 'self'`).
+- **Analysis verbs.** `mottled compare`, `sae` (fit report and top
+  features), `intervene` (divergence and effect against a norm-matched
+  random control; `-o` writes the scene) and `dose` (a `DoseSweep`) wrap
+  existing library calls and print JSON. `mottled arrays --format
+  npz|safetensors` exports a `.mtj`'s arrays, manifest included, for numpy,
+  torch or a notebook.
+- **Behaviour change:** bare `mottled` prints help instead of launching the
+  explorer, which is now `mottled ui` (`mottled app` still works and warns).
+- **Repair.** A steer applied at every position is scored as the mean shift
+  over all steered positions (`score_against_control(token=None)`), not the
+  last position's alone. MoE routing indices for interleaved stacks come
+  from the config (`decoder_sparse_step`, `mlp_only_layers`,
+  `first_k_dense_replace`/`moe_layer_freq`, `interleave_moe_layer_step`)
+  instead of being assumed to be the last n blocks.
+
+### Per-layer neighborhood preservation
+- Projection quality gains `per_layer` (k-NN preservation within each
+  layer, in both spaces), a cosine variant and `chance_layer`, its
+  expectation under random placement. The pooled score mostly measures
+  layer separation: on GPT-2 (8 prompts × 13 layers, as reported in #49) it
+  ranked a random projection above PCA (0.339 vs 0.318), while per layer
+  PCA leads (0.550 vs 0.447). The fields are optional, so existing callers
+  and `.mtj` files are unchanged.
+
+### The parity matrix runs clean
+- The `tlens` extra is capped at `transformer-lens>=1.14,<4`: 4.0 removed
+  `HookedTransformer`, so the unbounded extra installed a version Mottled
+  cannot import. `mottled parity`'s TransformerLens row loads GPT-2 without
+  TL's prepended BOS (HF prepends none, so the two sides compared different
+  token sequences), and its NNsight row gives a tokenizer with no pad token
+  the EOS token, since NNsight pads.
 
 ### The shotgun blast: one pellet per prompt
 - **`blast.py`** draws many prompts as one family: each prompt is one pellet,
