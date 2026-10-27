@@ -22,6 +22,7 @@ A patch effect shows sufficiency under the tested conditions, not mechanism
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -69,6 +70,11 @@ def load_model(name: str, revision: str | None):
                                                  dtype=torch.float32)
     model.to("cpu").eval()
     resolved = getattr(model.config, "_commit_hash", None)
+    if resolved is None and revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
+        # transformers 5.20 no longer sets _commit_hash; a full commit SHA is
+        # immutable on the hub, so files fetched by it are that commit's
+        resolved = revision
+        model.config._commit_hash = revision
     if revision is not None and resolved != revision:
         raise ValueError(f"{name} at revision {revision} resolved to commit {resolved}")
     return model, tokenizer
