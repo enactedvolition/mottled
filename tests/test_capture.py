@@ -155,3 +155,30 @@ def test_mamba_layout_resolves():
         capture(model, PROMPT, tokenizer=DummyTokenizer(), capture_components=True)
     with pytest.raises(ValueError):
         capture(model, PROMPT, tokenizer=DummyTokenizer(), capture_attention=True)
+
+
+def test_load_by_repo_id_records_the_commit_it_loaded(tmp_path, monkeypatch):
+    # transformers >= 5.20 no longer sets config._commit_hash, so every scene
+    # recorded revision: null until load_model read it from the hub cache. A
+    # fake cache holding one snapshot under refs/main stands in for the hub.
+    import huggingface_hub.constants as hub_constants
+
+    from capture import load_model
+
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    repo = tmp_path / "models--mottled-test--tiny"
+    synthetic.save_to(repo / "snapshots" / sha)
+    (repo / "refs").mkdir()
+    (repo / "refs" / "main").write_text(sha)
+    monkeypatch.setattr(hub_constants, "HF_HUB_CACHE", str(tmp_path))
+    monkeypatch.setattr(hub_constants, "HF_HUB_OFFLINE", True)
+
+    model, _ = load_model("mottled-test/tiny")
+    assert model.config._commit_hash == sha
+
+    # a local checkpoint under the same name is what loads; it is not that commit
+    local = tmp_path / "cwd"
+    synthetic.save_to(local / "mottled-test" / "tiny")
+    monkeypatch.chdir(local)
+    model, _ = load_model("mottled-test/tiny")
+    assert getattr(model.config, "_commit_hash", None) is None

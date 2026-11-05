@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixes
+- **Scenes name their weights again on transformers ≥ 5.20.** That release
+  stopped setting `config._commit_hash`, so every capture from a fresh
+  install recorded `revision: null` in its provenance, and nothing said so.
+  `capture.load_model` now reads the commit from the hub cache's snapshot
+  for the ref it loaded. A model loaded outside Mottled on ≥ 5.20 still
+  records `null`: transformers keeps the commit nowhere, and naming the
+  cache's current `main` instead could name weights the model does not
+  have. `experiments/patching.py` accepts a pinned full SHA the same way
+  `experiments/introspection.py` already did.
+
 ## 0.3.0 — 2026-10-27
 
 ### A registered introspection experiment
