@@ -802,6 +802,27 @@ end-to-end run writes every registered cell and passes its controls.
 
 None so far.
 
+### Notes after registration
+
+Facts established after the plan was committed. None changes the design.
+
+- **Smoke run on a different model.** Before the registered run, both
+  scripts ran end to end on `Qwen/Qwen2.5-0.5B-Instruct` (revision
+  `7ae55760…`, same architecture and tokenizer family; CPU, float32), with
+  the lens fit on one train document cut to 32 tokens and evaluation capped
+  at one test document. All three controls passed: residual orthogonality
+  1.3e-16, written-norm error 1.2e-7, unedited-pass difference exactly 0.
+  Its accuracies (20 items per cell, a lens fit on 15 positions) are not
+  results and are not reported.
+- **What the decomposition selected there.** The leading atoms were often
+  on-topic for the concept (glacier → 地质 "geology"; penguin → 北极
+  "Arctic", 鸟类 "birds"; bicycle → 汽车 "car"), with tokens that read as
+  noise further down. To check that the registered selection rule (largest
+  inner product of a *unit-normalised* atom) was not the source of the
+  noise, selection by the raw inner product (the lens logit) was compared on
+  six test concepts: the variance shares and the selected tokens barely
+  changed. The registered rule stands.
+
 ## Corpus provenance
 
 `sotu_corpus.jsonl` is derived from the npm package
