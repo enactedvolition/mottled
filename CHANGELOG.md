@@ -15,6 +15,12 @@
   before its code or any number: does the Jacobian-lens component of the
   introspection run's concept directions make the untrained model identify
   the written concept above the nothing-written rate?
+- **`experiments/introspection_workspace.py`** implements that plan, committed
+  after it: it refuses a lens that is not a Jacobian lens fit on the plan's
+  train documents for the same weights, splits each held-out direction by
+  NN-OMP, and scores every arm through the introspection experiment's own
+  write and readout. A failed control exits 1 after the outputs are written.
+  Not yet run on the registered model.
 
 ### Fixes
 - **Scenes name their weights again on transformers ≥ 5.20.** That release
