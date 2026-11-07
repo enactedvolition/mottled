@@ -14,7 +14,7 @@ until the research requirements settle. Run from the repository root
 | `make_sotu_corpus.py` | Rebuilds `sotu_corpus.jsonl` from the npm package, byte for byte |
 | `introspection.py` | Can a model learn to report a concept written into its residual stream? (pre-registered below) |
 | `jacobian_lens.py` | Fits a Jacobian lens (the corpus-averaged Jacobian to the last state) as a tuned-lens directory |
-| *`introspection_workspace`* | Plan only, code to follow: does the Jacobian-lens component of the introspection concept directions reach report? (pre-registered below) |
+| `introspection_workspace.py` | Does the Jacobian-lens component of the introspection concept directions reach report? (pre-registered below) |
 
 ## `patching.py`
 
@@ -774,6 +774,29 @@ descriptive for that reason.
   atom of its own; the paper shares this limitation.
 - **Different models.** The paper's evidence is on Claude models; whether a
   1.5B model has this structure at all is part of what is unknown.
+
+### Running it
+
+    python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --out lens/
+    python -m experiments.introspection_workspace --device xpu --dtype bfloat16 \
+        --lens lens/ --out results.json --summary summary.json
+
+Two commands in one sitting: the first fits the lens (the plan's "same
+session, before any evaluation"). The second refuses, before it evaluates
+anything, a lens that is not a Jacobian lens fit on the plan's train
+documents for the same weights, and records the SHA-256 of its `params.pt`.
+The unedited-pass control runs on every none-arm item of both tasks. The
+process exits 1 after writing its outputs if a control fails.
+
+`main(argv, loaded=(model, tokenizer, letters, numbers))` runs everything but
+the download; `tests/test_introspection_workspace.py` uses it on a tiny model
+(machinery only — its numbers mean nothing). Pinned there: NN-OMP recovers a
+known non-negative combination and selects nothing when no atom has a
+positive inner product; its residual is orthogonal to its positive atoms, so
+u_J ⊥ u_⊥ and their variance shares sum to 1; lens vectors give the lens
+logit up to the norm's scale, and a LayerNorm is refused; a lens fit on other
+documents is refused; the decision rule computes as stated; a tiny
+end-to-end run writes every registered cell and passes its controls.
 
 ### Deviations from the plan
 
