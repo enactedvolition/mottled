@@ -13,6 +13,8 @@ until the research requirements settle. Run from the repository root
 | `sotu_corpus.jsonl` | 80 State of the Union excerpts, the experiment's corpus |
 | `make_sotu_corpus.py` | Rebuilds `sotu_corpus.jsonl` from the npm package, byte for byte |
 | `introspection.py` | Can a model learn to report a concept written into its residual stream? (pre-registered below) |
+| `jacobian_lens.py` | Fits a Jacobian lens (the corpus-averaged Jacobian to the last state) as a tuned-lens directory |
+| *`introspection_workspace`* | Plan only, code to follow: does the Jacobian-lens component of the introspection concept directions reach report? (pre-registered below) |
 
 ## `patching.py`
 
@@ -602,6 +604,180 @@ model represents or reports its unperturbed states.
   the readout is direction-specific; it does not show it is concept-specific.
 - **One model, one layer, one strength, one seed.** No safety evaluation was
   run on this adapter (registered gap).
+
+## `jacobian_lens.py`
+
+`python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --out lens/`
+fits J_l = E[∂h_final / ∂h_l] for every state below the last, on the
+introspection plan's 40 train documents (first 128 tokens of each), with the
+estimator of the paper's reference implementation (Gurnee et al. 2026,
+"Verbalizable Representations Form a Global Workspace in Language Models";
+github.com/anthropics/jacobian-lens): a one-hot cotangent at every valid
+target position at once, so the gradient at source position p sums over
+targets p' ≥ p; averaged over valid source positions (the first 16 and the
+last excluded), then over documents. The target is the last block's output,
+the head's own input, so J_final = I.
+
+It writes a tuned-lens directory with translator J_l − I and no bias, so
+`capture --lens lens/` reads h as head(norm(J_l h)), and prints the SHA-256
+of `params.pt`. `config.json` records the model revision, corpus hash,
+document ids, token counts and settings, and `lens_kind: "jacobian"`, which
+`tuned_lens.from_dir` carries into the trajectory's lens record so
+`readout_name` says "Jacobian lens", not "tuned lens". A Jacobian-lens
+readout is a **readout diagnostic** (docs/validity.md): what a state is
+disposed, on average over this corpus, to make the model say.
+
+Cost: one forward and ⌈D / dim_batch⌉ backward passes per document, 192 for
+Qwen2.5-1.5B at the default dim_batch of 8. Not yet measured on hardware.
+
+Pinned by `tests/test_jacobian_lens.py`: the estimator equals the same
+quantity taken from the full autograd Jacobian (with and without a remainder
+pass); the fit is the mean over sequences; the written lens reads as
+head(norm(J h)) and leaves the last layer untouched; `main` fits on exactly
+the registered train documents and prints the hash of what it wrote.
+
+Known gap: the viewer names a scene's readout from its `config.lens` string
+alone, so a scene exported through a Jacobian-lens directory shows "tuned
+lens" there. Trajectory records and the Python surfaces name it correctly.
+
+## `introspection_workspace` — pre-registered analysis plan
+
+Registered in the commit that added this section, before the code that runs
+it and before any number from it existed: no Jacobian lens had been fit on
+this model and no arm below had been evaluated. Changes after that commit go
+under *Deviations* with reasons.
+
+### Question
+
+The introspection run's untrained model identified a written concept at
+chance (0.246, against 0.245 with nothing written), and writing the full
+concept vector over the user turn put the concept's first token in the top
+10 for at most 1 of 30 train concepts at strengths 0.25–4, and for none at
+strengths up to 32 (introspection, *Notes after registration*). Gurnee et al. 2026 report, for directions built the same way
+("Tell me about {c}" minus a mean), that 6–7% of the variance lies in the
+directions their Jacobian lens reads (the "J-space"), and that at equal
+norm, swapping along that component moved the swapped-in word into the top 5
+outputs on 59% of trials against 5% for the remainder. Their models are
+Claude models. In Qwen2.5-1.5B-Instruct, does the J-space component of the
+same registered concept directions, written at the same layer and norm, make
+the untrained model identify the concept more often than when nothing is
+written?
+
+### Design
+
+Everything not stated here is the introspection plan's, reused through its
+code: model and revision, concepts and split, corpus and document split, test
+items, rendering, injection site (state 19 of 28), passage-token mask, and
+scoring from next-token logits over the four labels. **Untrained model only;
+no LoRA.**
+
+**Jacobian lens.** `experiments/jacobian_lens.py` at the commit that
+implements this plan, run on the model in the same session before any
+evaluation, with its default fit settings (above: the 40 train documents,
+128 tokens each, first 16 positions and the last excluded, last-block
+target) and the evaluation's device and dtype. Only J_19 is used. The
+SHA-256 of `params.pt`, dtype and device are recorded.
+
+**Lens vectors.** For every token id t below `len(tokenizer)`:
+a_t = J_19ᵀ (γ ⊙ W_U[t]), with W_U the LM head and γ the final RMSNorm
+weight, so ⟨a_t, h⟩ is the lens logit of t up to the 1/rms factor the norm
+applies. (The paper calls the rows of W_U J_l the lens vectors; folding γ in
+is this plan's reading of "up to normalization", stated here as an
+assumption.)
+
+**Decomposition.** Each test concept's registered direction u (unit) is
+split by non-negative orthogonal matching pursuit over the lens vectors,
+k = 16 steps (the paper's k for concept vectors). Each step selects, among
+atoms not yet selected, the one whose unit-normalised vector has the largest
+positive inner product with the current residual (stopping early if none is
+positive), then refits non-negative least squares (`scipy.optimize.nnls`) on
+every selected atom. u_J = the final fit; u_⊥ = u − u_J. The paper used
+gradient pursuit; NN-OMP is used here because it is deterministic and its
+fit is exact on its support.
+
+**Arms**, each written at |v| = 4 × the median norm, computed as the
+introspection plan computes it (strength fixed at 4, the value the
+registered run used, not re-calibrated):
+
+- *none*;
+- *full*: u, the registered `concept` condition;
+- *J*: u_J / |u_J|;
+- *⊥*: u_⊥ / |u_⊥|.
+
+Equal norm means the J arm writes its component about 1/|u_J| times as
+strongly as the full arm does. That is the comparison the paper made.
+
+**Tasks.** identify × {none, full, J, ⊥} and prime × {none, J}, on the 800
+test items per task.
+
+**Manipulation check.** The registered calibration prompt ("Say one word.",
+written over the user turn) on the 20 test concepts, for full, J and ⊥ at
+strengths {0.25, 0.5, 1, 2, 4} × the median norm: the fraction of concepts
+whose first token, in any form `_word_token_ids` admits, is in the top 10
+next tokens.
+
+**Controls.** The run exits non-zero, after writing its outputs, if any
+fails:
+
+- *Unedited pass*: none-arm answer logits bit-identical to an unhooked pass.
+- *Decomposition*: |u_J| > 0 for every test concept, and the residual is
+  orthogonal to every atom with a positive coefficient,
+  max |⟨u − u_J, â⟩| ≤ 1e-4.
+- *Norm*: every written vector within 1e-3 (relative) of the target norm.
+
+### Hypothesis and decision rule
+
+**H1 (primary).** On the untrained model, test concepts and test documents,
+identification accuracy in the J arm exceeds identification accuracy with
+nothing written. Crossed bootstrap as in the introspection plan (20 concepts
+× 40 documents, B = 2000, seed 0, every statistic on the same draws).
+**Supported** if the 95% percentile interval of accuracy(J) − accuracy(none)
+lies above 0; otherwise **not supported**.
+
+Reported descriptively, with no confirmatory claim: every arm's
+identification accuracy and answer distribution; J − full and J − ⊥;
+prime(J) − prime(none) and identify(J) − prime(J); the manipulation-check
+table; per concept, |u_J|² (its variance share), the selected tokens with
+coefficients, and whether the concept's own first token is among them.
+
+### Sample size
+
+As the introspection plan: 800 trials per cell in 20 × 40 crossed clusters,
+differences of about 0.13 detectable at 80% power under its planning
+assumption. The manipulation check has 20 concepts per cell and is
+descriptive for that reason.
+
+### Interpretation, registered before any number
+
+- **H1 supported, and prime(J) − prime(none) about as large:** the component
+  reaches report as salience: the model picks the written word whatever it
+  is asked. That bears on the paper's claim (report reads the J-space
+  component) and on the registered null (it was at least partly a property
+  of the full vector). It is not evidence of introspection, which needs
+  identify to beat prime.
+- **H1 supported, identify(J) clearly above prime(J):** report of the written
+  concept beyond priming, without training. Still **sufficiency** under these
+  conditions (docs/validity.md), not mechanism.
+- **H1 not supported, manipulation check J above ⊥:** the component reaches
+  the output, but not 4-way identification.
+- **Neither:** at this layer and norm, the decomposition does not isolate a
+  reportable component in this model. This run cannot separate "no
+  workspace-like structure at 1.5B" from "a Jacobian lens fit on 40
+  documents does not capture it".
+
+### Known gaps, registered now
+
+- **No trained arm.** Training on J-space components is a separate plan.
+- **One layer, one strength, one lens fit** (40 documents × 128 tokens; the
+  paper used 1,000 sequences and reports quality usable by about 100).
+- **Single-token atoms.** A concept whose name is several tokens may have no
+  atom of its own; the paper shares this limitation.
+- **Different models.** The paper's evidence is on Claude models; whether a
+  1.5B model has this structure at all is part of what is unknown.
+
+### Deviations from the plan
+
+None so far.
 
 ## Corpus provenance
 
