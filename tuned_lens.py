@@ -49,6 +49,10 @@ class TunedLens:
     source: str               # hub path or local directory it was loaded from
     revision: str | None      # Space commit, when it came from the hub
     base_model_revision: str | None   # the weights it was trained against
+    # "jacobian": an averaged-Jacobian lens (experiments/jacobian_lens.py)
+    # stored in this format. It is not KL-trained, so naming it "tuned"
+    # would claim a fit it never had.
+    kind: str = "tuned"
 
     @property
     def n_layers(self) -> int:
@@ -56,15 +60,16 @@ class TunedLens:
 
     def record(self) -> dict:
         """What a trajectory's meta says about the readout it carries."""
-        return {"kind": "tuned", "source": self.source, "revision": self.revision,
+        return {"kind": self.kind, "source": self.source, "revision": self.revision,
                 "base_model_revision": self.base_model_revision}
 
 
 def readout_name(meta) -> str:
-    """"tuned lens" or "logit lens", from a trajectory's meta. A capture
-    that does not say is a raw logit lens: every backend before this one was."""
+    """"tuned lens", "Jacobian lens" or "logit lens", from a trajectory's
+    meta. A capture that does not say is a raw logit lens: every backend
+    before this one was."""
     kind = ((meta or {}).get("lens") or {}).get("kind", "logit")
-    return "tuned lens" if kind == "tuned" else "logit lens"
+    return {"tuned": "tuned lens", "jacobian": "Jacobian lens"}.get(kind, "logit lens")
 
 
 def from_dir(path) -> TunedLens:
@@ -81,7 +86,8 @@ def from_dir(path) -> TunedLens:
     bias = (np.stack([state[f"{i}.bias"].float().numpy() for i in range(n)])
             if config.get("bias", True) else np.zeros(weight.shape[:2], np.float32))
     return TunedLens(weight=weight, bias=bias, source=str(path), revision=None,
-                     base_model_revision=config.get("base_model_revision"))
+                     base_model_revision=config.get("base_model_revision"),
+                     kind=config.get("lens_kind", "tuned"))
 
 
 @functools.lru_cache(maxsize=4)

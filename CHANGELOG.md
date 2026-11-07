@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Jacobian lens and a registered follow-up
+- **`experiments/jacobian_lens.py`** fits the corpus-averaged Jacobian from
+  each state to the last (Gurnee et al. 2026, with their reference
+  implementation's estimator) and writes it as a tuned-lens directory, so
+  `capture --lens DIR` reads h as head(norm(J h)). A test pins the estimator
+  against the full autograd Jacobian. `tuned_lens` now carries a lens's
+  `kind` from its directory into the trajectory record, so a Jacobian lens is
+  named "Jacobian lens" rather than "tuned lens"; the viewer still labels
+  such a scene "tuned lens" (known gap). `experiments/` is not packaged.
+- **`introspection_workspace` is pre-registered** in `experiments/README.md`
+  before its code or any number: does the Jacobian-lens component of the
+  introspection run's concept directions make the untrained model identify
+  the written concept above the nothing-written rate?
+
 ### Fixes
 - **Scenes name their weights again on transformers ≥ 5.20.** That release
   stopped setting `config._commit_hash`, so every capture from a fresh
