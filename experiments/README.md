@@ -14,7 +14,7 @@ until the research requirements settle. Run from the repository root
 | `make_sotu_corpus.py` | Rebuilds `sotu_corpus.jsonl` from the npm package, byte for byte |
 | `introspection.py` | Can a model learn to report a concept written into its residual stream? (pre-registered below) |
 | `jacobian_lens.py` | Fits a Jacobian lens (the corpus-averaged Jacobian to the last state) as a tuned-lens directory |
-| *`introspection_workspace`* | Plan only, code to follow: does the Jacobian-lens component of the introspection concept directions reach report? (pre-registered below) |
+| `introspection_workspace.py` | Does the Jacobian-lens component of the introspection concept directions reach report? (pre-registered below) |
 
 ## `patching.py`
 
@@ -775,9 +775,53 @@ descriptive for that reason.
 - **Different models.** The paper's evidence is on Claude models; whether a
   1.5B model has this structure at all is part of what is unknown.
 
+### Running it
+
+    python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --out lens/
+    python -m experiments.introspection_workspace --device xpu --dtype bfloat16 \
+        --lens lens/ --out results.json --summary summary.json
+
+Two commands in one sitting: the first fits the lens (the plan's "same
+session, before any evaluation"). The second refuses, before it evaluates
+anything, a lens that is not a Jacobian lens fit on the plan's train
+documents for the same weights, and records the SHA-256 of its `params.pt`.
+The unedited-pass control runs on every none-arm item of both tasks. The
+process exits 1 after writing its outputs if a control fails.
+
+`main(argv, loaded=(model, tokenizer, letters, numbers))` runs everything but
+the download; `tests/test_introspection_workspace.py` uses it on a tiny model
+(machinery only — its numbers mean nothing). Pinned there: NN-OMP recovers a
+known non-negative combination and selects nothing when no atom has a
+positive inner product; its residual is orthogonal to its positive atoms, so
+u_J ⊥ u_⊥ and their variance shares sum to 1; lens vectors give the lens
+logit up to the norm's scale, and a LayerNorm is refused; a lens fit on other
+documents is refused; the decision rule computes as stated; a tiny
+end-to-end run writes every registered cell and passes its controls.
+
 ### Deviations from the plan
 
 None so far.
+
+### Notes after registration
+
+Facts established after the plan was committed. None changes the design.
+
+- **Smoke run on a different model.** Before the registered run, both
+  scripts ran end to end on `Qwen/Qwen2.5-0.5B-Instruct` (revision
+  `7ae55760…`, same architecture and tokenizer family; CPU, float32), with
+  the lens fit on one train document cut to 32 tokens and evaluation capped
+  at one test document. All three controls passed: residual orthogonality
+  1.3e-16, written-norm error 1.2e-7, unedited-pass difference exactly 0.
+  Its accuracies (20 items per cell, a lens fit on 15 positions) are not
+  results and are not reported.
+- **What the decomposition selected there.** The leading atoms were often
+  on-topic for the concept (glacier → 地质 "geology"; penguin → 北极
+  "Arctic", 鸟类 "birds"; bicycle → 汽车 "car"), with tokens that read as
+  noise further down. To check that the registered selection rule (largest
+  inner product of a *unit-normalised* atom) was not the source of the
+  noise, selection by the raw inner product (the lens logit) was compared on
+  six test concepts: the variance shares and the selected tokens barely
+  changed. The registered rule stands.
 
 ## Corpus provenance
 
