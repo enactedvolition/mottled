@@ -796,6 +796,12 @@ The unedited-pass control runs on the first 50 items of each task (100 items,
 200 forward passes): the plan requires a difference of exactly 0, not a
 census. The process exits 1 after writing its outputs if a control fails.
 
+Measured on the Arc 140V (XPU, bfloat16, torch 2.14.1+xpu) with timing-only
+probes whose outputs are not used: the state-19 fit takes about 31 s per
+document once warm (about 21 minutes for 40; dim_batch 16 was no faster),
+and a scored item takes 0.157 s (about 13 minutes for the 4,800). The whole
+run is about 40 minutes.
+
 `main(argv, loaded=(model, tokenizer, letters, numbers))` runs everything but
 the download; `tests/test_introspection_workspace.py` uses it on a tiny model
 (machinery only — its numbers mean nothing). Pinned there: NN-OMP recovers a
