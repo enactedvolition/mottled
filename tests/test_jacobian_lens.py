@@ -72,6 +72,22 @@ def test_fit_is_the_mean_over_sequences():
                                (jl.jacobians(model, a, SKIP) + jl.jacobians(model, b, SKIP)) / 2)
 
 
+def test_fitting_one_layer_gives_that_layers_full_fit_J():
+    model, ids = _model(), _ids()
+    full = jl.jacobians(model, ids, skip_first=SKIP)
+    torch.testing.assert_close(jl.jacobians(model, ids, skip_first=SKIP, layers=[1])[0], full[1],
+                               rtol=1e-5, atol=1e-6)
+
+
+def test_a_partial_lens_is_refused_as_a_readout(tmp_path):
+    model, ids = _model(), _ids()
+    jl.save(tmp_path / "lens", jl.jacobians(model, ids, SKIP, layers=[1]), {},
+            layers=[1], n_blocks=BLOCKS)
+    assert json.loads((tmp_path / "lens" / "config.json").read_text())["layers"] == [1]
+    with pytest.raises(ValueError, match="partial lens"):
+        tuned_lens.from_dir(tmp_path / "lens")
+
+
 def test_too_short_a_sequence_is_refused():
     with pytest.raises(ValueError, match="no valid position"):
         jl.valid_positions(3, skip_first=2)

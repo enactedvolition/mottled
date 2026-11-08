@@ -82,6 +82,11 @@ def from_dir(path) -> TunedLens:
     # unpickling arbitrary objects to load is not one
     state = torch.load(path / "params.pt", map_location="cpu", weights_only=True)
     n = int(config["num_hidden_layers"])
+    if config.get("layers") not in (None, list(range(n))):
+        # a missing translator would read that layer through the raw head
+        # while the record named the whole readout after this lens
+        raise ValueError(f"{path} is a partial lens (states {config['layers']} of {n}); "
+                         "it cannot be applied as a readout at every layer")
     weight = np.stack([state[f"{i}.weight"].float().numpy() for i in range(n)])
     bias = (np.stack([state[f"{i}.bias"].float().numpy() for i in range(n)])
             if config.get("bias", True) else np.zeros(weight.shape[:2], np.float32))

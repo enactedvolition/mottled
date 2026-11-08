@@ -80,11 +80,12 @@ def test_lens_vectors_refuse_a_layernorm():
         ws.lens_vectors(model, torch.eye(32, dtype=torch.float64), 10)
 
 
-def _lens(tmp_path, model, tok, docs, **record):
+def _lens(tmp_path, model, tok, docs, layers=None):
     seqs = [torch.tensor(tok(d["text"], add_special_tokens=False)["input_ids"][:jl.MAX_TOKENS])
             for d in docs]
     path = tmp_path / "lens"
-    jl.save(path, jl.fit(model, seqs), {"docs": [d["id"] for d in docs], **record})
+    jl.save(path, jl.fit(model, seqs, layers=layers), {"docs": [d["id"] for d in docs]},
+            layers=layers, n_blocks=3)
     return path
 
 
@@ -93,7 +94,15 @@ def test_a_lens_fit_on_other_documents_is_refused(tmp_path):
     train, test = ix.doc_split(ix.load_corpus(base._corpus(tmp_path), check=False))
     path = _lens(tmp_path, model, tok, test[:2])
     with pytest.raises(ValueError, match="train documents"):
-        ws.load_lens(path, train[:2], 3, None)
+        ws.load_lens(path, train[:2], 3, None, 2)
+
+
+def test_a_lens_without_J_at_the_injection_state_is_refused(tmp_path):
+    tok, model = base._tokenizer(), base._model()
+    train, _ = ix.doc_split(ix.load_corpus(base._corpus(tmp_path), check=False))
+    path = _lens(tmp_path, model, tok, train[:2], layers=[1])
+    with pytest.raises(ValueError, match="no J at state 2"):
+        ws.load_lens(path, train[:2], 3, None, 2)
 
 
 def test_decision_rule():
@@ -115,7 +124,7 @@ def test_end_to_end_on_a_tiny_model(tmp_path):
     tok, model = base._tokenizer(), base._model()
     corpus = base._corpus(tmp_path)
     train, _ = ix.doc_split(ix.load_corpus(corpus, check=False))
-    lens = _lens(tmp_path, model, tok, train[:2])
+    lens = _lens(tmp_path, model, tok, train[:2], layers=[2])     # the injection state only
     out, summ = tmp_path / "r.json", tmp_path / "s.json"
     s = ws.main(["--corpus", str(corpus), "--docs", "2", "--bootstrap", "20", "--lens", str(lens),
                  "--out", str(out), "--summary", str(summ)],
@@ -124,6 +133,7 @@ def test_end_to_end_on_a_tiny_model(tmp_path):
     assert {(x["task"], x["cond"]) for x in r["records"]} == set(ws.PLAN)
     assert s["controls"]["passed"], s["controls"]
     assert s["controls"]["unedited_max_abs_diff"] == 0.0
+    assert s["provenance"]["lens_config"]["layers"] == [2]
     assert s["H1"] in {"supported", "not supported"}
     assert set(s["manipulation_check"]) == {"full", "J", "perp"}
     assert all(len(d["tokens"]) <= ws.K for d in s["decomposition"].values())

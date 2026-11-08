@@ -628,13 +628,19 @@ readout is a **readout diagnostic** (docs/validity.md): what a state is
 disposed, on average over this corpus, to make the model say.
 
 Cost: one forward and ⌈D / dim_batch⌉ backward passes per document, 192 for
-Qwen2.5-1.5B at the default dim_batch of 8. Not yet measured on hardware.
+Qwen2.5-1.5B at the default dim_batch of 8, each from the last state down to
+the lowest state fitted. `--layers 19` fits J at state 19 alone: the graph is
+rooted there, so J_19 is the same estimator and the backward covers 9 blocks
+instead of 28. Such a partial lens is written with only its translators and
+a `layers` entry, and `tuned_lens.from_dir` refuses it as a readout.
 
 Pinned by `tests/test_jacobian_lens.py`: the estimator equals the same
 quantity taken from the full autograd Jacobian (with and without a remainder
 pass); the fit is the mean over sequences; the written lens reads as
-head(norm(J h)) and leaves the last layer untouched; `main` fits on exactly
-the registered train documents and prints the hash of what it wrote.
+head(norm(J h)) and leaves the last layer untouched; fitting one layer gives
+that layer's J from the full fit; a partial lens is refused as a readout;
+`main` fits on exactly the registered train documents and prints the hash of
+what it wrote.
 
 Known gap: the viewer names a scene's readout from its `config.lens` string
 alone, so a scene exported through a Jacobian-lens directory shows "tuned
@@ -777,16 +783,24 @@ descriptive for that reason.
 
 ### Running it
 
-    python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --out lens/
+    python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --layers 19 --out lens/
     python -m experiments.introspection_workspace --device xpu --dtype bfloat16 \
         --lens lens/ --out results.json --summary summary.json
 
 Two commands in one sitting: the first fits the lens (the plan's "same
-session, before any evaluation"). The second refuses, before it evaluates
-anything, a lens that is not a Jacobian lens fit on the plan's train
-documents for the same weights, and records the SHA-256 of its `params.pt`.
-The unedited-pass control runs on every none-arm item of both tasks. The
-process exits 1 after writing its outputs if a control fails.
+session, before any evaluation") at state 19 only, the one state the plan
+uses. The second refuses, before it evaluates anything, a lens that is not a
+Jacobian lens fit on the plan's train documents for the same weights or that
+has no J at the injection state, and records the SHA-256 of its `params.pt`.
+The unedited-pass control runs on the first 50 items of each task (100 items,
+200 forward passes): the plan requires a difference of exactly 0, not a
+census. The process exits 1 after writing its outputs if a control fails.
+
+Measured on the Arc 140V (XPU, bfloat16, torch 2.14.1+xpu) with timing-only
+probes whose outputs are not used: the state-19 fit takes about 31 s per
+document once warm (about 21 minutes for 40; dim_batch 16 was no faster),
+and a scored item takes 0.157 s (about 13 minutes for the 4,800). The whole
+run is about 40 minutes.
 
 `main(argv, loaded=(model, tokenizer, letters, numbers))` runs everything but
 the download; `tests/test_introspection_workspace.py` uses it on a tiny model

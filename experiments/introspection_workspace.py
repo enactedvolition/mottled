@@ -9,7 +9,7 @@ Jacobian-lens vectors (non-negative OMP, k = 16) and the remainder. Each
 part, and the whole, is written at the same norm over held-out passages, and
 the untrained model is asked which concept was injected.
 
-    python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --out lens/
+    python -m experiments.jacobian_lens --device xpu --dtype bfloat16 --layers 19 --out lens/
     python -m experiments.introspection_workspace --device xpu --dtype bfloat16 \
         --lens lens/ --out results.json --summary summary.json
 
@@ -40,6 +40,9 @@ K = 16              # the paper's k for concept vectors
 STRENGTH = 4.0      # the registered introspection run's strength, not re-calibrated
 ORTH_TOL = 1e-4
 NORM_TOL = 1e-3
+# items per task for the unedited-pass control: the plan requires a difference
+# of exactly 0, not a census, and each check is two forward passes
+CONTROL_ITEMS = 50
 # (task, arm); "none" writes nothing, the others write that arm's direction
 PLAN = (("identify", "none"), ("identify", "full"), ("identify", "J"),
         ("identify", "perp"), ("prime", "none"), ("prime", "J"))
@@ -155,28 +158,30 @@ def summarize(records, concepts, docs, B=2000):
     return out
 
 
-def load_lens(path, train_docs, n_blocks, revision):
-    """The lens directory jacobian_lens.py wrote, refused before any
-    evaluation unless it is a Jacobian lens fit on these train documents for
-    these weights."""
-    import tuned_lens
-
+def load_lens(path, train_docs, n_blocks, revision, layer):
+    """J at `layer` from the directory jacobian_lens.py wrote (a full lens or
+    one fit only there), refused before any evaluation unless it is a
+    Jacobian lens fit on these train documents for these weights.
+    Returns (J float64 (D, D), config, sha256 of params.pt)."""
     path = Path(path)
     config = json.loads((path / "config.json").read_text())
-    lens = tuned_lens.from_dir(path)
+    state = torch.load(path / "params.pt", map_location="cpu", weights_only=True)
     problems = []
-    if lens.kind != "jacobian":
-        problems.append(f"lens_kind is {lens.kind!r}")
+    if config.get("lens_kind") != "jacobian":
+        problems.append(f"lens_kind is {config.get('lens_kind')!r}")
     if config.get("docs") != [d["id"] for d in train_docs]:
         problems.append("it was not fit on the plan's train documents")
-    if lens.n_layers != n_blocks:
-        problems.append(f"it has {lens.n_layers} translators for {n_blocks} blocks")
+    if config.get("num_hidden_layers") != n_blocks:
+        problems.append(f"it is for {config.get('num_hidden_layers')} blocks, not {n_blocks}")
+    if f"{layer}.weight" not in state:
+        problems.append(f"it has no J at state {layer}")
     if revision is not None and config.get("base_model_revision") not in (None, revision):
         problems.append(f"it was fit on revision {config['base_model_revision']}")
     if problems:
         raise ValueError(f"{path} is not the registered lens: " + "; ".join(problems))
+    w = state[f"{layer}.weight"].double()
     sha = hashlib.sha256((path / "params.pt").read_bytes()).hexdigest()
-    return lens, config, sha
+    return w + torch.eye(w.shape[0], dtype=torch.float64), config, sha
 
 
 def main(argv=None, loaded=None):
@@ -212,10 +217,8 @@ def main(argv=None, loaded=None):
     layer = ix.injection_layer(model)
     from models.families import resolve_family
     revision = getattr(model.config, "_commit_hash", None)
-    lens, lens_config, lens_sha = load_lens(args.lens, train_docs,
-                                            resolve_family(model).n_layers, revision)
-    J = torch.from_numpy(lens.weight[layer]).double() + torch.eye(lens.weight.shape[-1],
-                                                                  dtype=torch.float64)
+    J, lens_config, lens_sha = load_lens(args.lens, train_docs,
+                                         resolve_family(model).n_layers, revision, layer)
     atoms = lens_vectors(model, J, len(tok))
 
     directions = ix.concept_directions(model, tok, ix.CONCEPTS, train_c, layer, device)
@@ -239,9 +242,10 @@ def main(argv=None, loaded=None):
     test_items, skipped = {}, {}
     for task in ("identify", "prime"):
         test_items[task], skipped[f"test/{task}"] = ix.make_items(task, test_docs, test_c)
-    # every item of both tasks' none arms: the plan's control names the arm, not a sample
+    controls["unedited_items"] = 2 * CONTROL_ITEMS
     controls["unedited_max_abs_diff"] = unedited_control(
-        model, tok, test_items["identify"] + test_items["prime"], layer, device, letters)
+        model, tok, test_items["identify"][:CONTROL_ITEMS] + test_items["prime"][:CONTROL_ITEMS],
+        layer, device, letters)
 
     records = []
     for task, arm in PLAN:
@@ -274,8 +278,8 @@ def main(argv=None, loaded=None):
         "corpus_sha256": hashlib.sha256(Path(args.corpus).read_bytes()).hexdigest(),
         "lens_params_sha256": lens_sha,
         "lens_config": {k: lens_config.get(k) for k in
-                        ("base_model_revision", "skip_first", "max_tokens", "dtype",
-                         "device", "git_commit")},
+                        ("base_model_revision", "layers", "skip_first", "max_tokens",
+                         "dtype", "device", "git_commit")},
     }
     decomposition = {c: {k: v for k, v in p.items() if k not in ("u_J", "u_perp")}
                      for c, p in parts.items()}
