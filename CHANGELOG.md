@@ -21,6 +21,16 @@
   NN-OMP, and scores every arm through the introspection experiment's own
   write and readout. A failed control exits 1 after the outputs are written.
   Not yet run on the registered model.
+- **Result (Arc 140V, bfloat16, registered run): H1 not supported.** On the
+  untrained Qwen2.5-1.5B-Instruct, the J component of the held-out concept
+  directions was identified at 0.254 against 0.245 with nothing written
+  (+0.009 [−0.031, +0.048]); it did not make the model say the concept word
+  either, and no concept's own token was among its selected atoms. Every
+  control passed. `experiments/results/introspection_workspace.summary.json`
+  is the run's summary byte for byte.
+- **`experiments/jacobian_lens.py --layers`** fits only the states asked for,
+  rooting the graph at the lowest (same estimator, a shorter backward); a
+  partial lens is refused as a readout.
 
 ### Fixes
 - **Scenes name their weights again on transformers ≥ 5.20.** That release

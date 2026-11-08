@@ -836,6 +836,90 @@ Facts established after the plan was committed. None changes the design.
   noise, selection by the raw inner product (the lens logit) was compared on
   six test concepts: the variance shares and the selected tokens barely
   changed. The registered rule stands.
+- **J_19 from a fit rooted at state 19 against the full fit, on the
+  registered hardware** (#68). On one train document
+  (`1790_george_washington_n`), XPU, bfloat16: two rooted fits were
+  bit-identical; the full fit's J_19 differed from the rooted one by 0.58%
+  in relative Frobenius norm (max |Δ| 0.0033 against a largest entry of
+  3.30). Single-document J_19 differ from one another by 51–63%, and one
+  document's from a three-document mean by 32%. Same estimator, reduced
+  precision; the registered run used the rooted fit.
+- **Run time.** The fit took 44–55 s per document during the registered
+  run, against 31 s in the timing probe (the machine was under sustained
+  load), so the whole run took 50 minutes rather than about 40.
+
+### Result of the registered run
+
+**Run.** 2026-11-07, 17:13–18:03 PT, on an Intel Arc 140V (XPU, bfloat16),
+torch 2.14.1+xpu, transformers 5.20.1, commit `8ef2a86`, model revision
+`989aa798…` as registered, loaded from the local hub cache. The two
+commands of *Running it*, in one sitting: the J_19 fit on the 40 train
+documents (17:13:30–17:45:57, `params.pt` sha256 `d0f5b21d…4ae2`), then the
+evaluation. Median norm 69.66 at state 19, so |v| = 278.63, as in the
+introspection run. The committed
+[`results/introspection_workspace.summary.json`](results/introspection_workspace.summary.json)
+is the run's `summary.json` byte for byte: sha256 `a08f6e9c…2df0` (18,355
+bytes, with the CRLF line endings it was written with), the hash the run
+printed. The full `results.json` (790,214 bytes, sha256 `403a7a7a…15ca`)
+stays on the run machine. A separate script recounted all six accuracies
+and answer distributions from its 4,800 per-trial records and matched the
+summary.
+
+**Controls: all passed.** Residual orthogonality 1.5e-16; written-norm
+error 1.2e-7; unedited-pass difference exactly 0 on 100 items; no concept
+with |u_J| = 0.
+
+**H1: not supported.** Untrained model, held-out concepts and passages, 800
+trials per cell, crossed-bootstrap 95% intervals:
+
+| Condition | Accuracy |
+|---|---|
+| identify, nothing written | 0.245 [0.199, 0.294] |
+| identify, full direction | 0.246 [0.195, 0.295] |
+| identify, J component | 0.254 [0.208, 0.300] |
+| identify, ⊥ component | 0.240 [0.191, 0.291] |
+| prime, nothing written | 0.241 [0.185, 0.300] |
+| prime, J component | 0.278 [0.228, 0.335] |
+
+identify J − identify none (H1) = +0.009 [−0.031, +0.048]. Descriptive:
+J − full = +0.008 [−0.053, +0.066]; J − ⊥ = +0.014 [−0.044, +0.070];
+prime J − prime none = +0.036 [−0.023, +0.098]; identify J − prime J =
+−0.024 [−0.098, +0.043].
+
+**Manipulation check.** Writing over "Say one word." put the concept's
+first token in the top 10 for at most 2 of the 20 test concepts in any
+cell: full 0, 0, 0.05, 0.05, 0.05; J 0, 0, 0, 0.05, 0.05; ⊥ 0, 0, 0.10,
+0.05, 0.05 at strengths 0.25, 0.5, 1, 2 and 4. J is not above ⊥.
+
+**Decomposition.** The J component's variance share had a median of 0.087
+(range 0.045–0.132), the same order as the 6–7% Gurnee et al. report for
+directions built this way. The concept's own first token was among the 16
+selected atoms for **none** of the 20 concepts; the selected tokens (in the
+summary) are mostly Chinese words and code fragments, with little visible
+relation to the concept.
+
+**Answers.** With nothing written the model answers "B" to 731 of the 800
+identification items. Every arm moves that distribution without moving
+accuracy (J: B 643, D 132; full: B 375, C 183, D 233; ⊥: B 327, C 255,
+D 206): a written vector changes which letter is picked, not toward the
+written concept.
+
+**Which registered interpretation applies: "neither."** H1 is not
+supported and the manipulation check does not put J above ⊥. At this
+layer and norm, the decomposition does not isolate a reportable component
+in this model, and this run cannot separate "no workspace-like structure at
+1.5B" from "a Jacobian lens fit on 40 documents does not capture it". That
+no concept's own token appears among its selected atoms is consistent with
+either.
+
+**What this licenses** (docs/validity.md). On Qwen2.5-1.5B-Instruct at
+state 19, writing the Jacobian-lens component of the registered concept
+directions at |v| = 278.6 did not make the untrained model identify the
+concept above the nothing-written rate (+0.009, interval up to +0.048) or
+say the concept word. A write shows sufficiency under its conditions; this
+null shows that none was detected under these, not that the model lacks a
+workspace. One model, one layer, one norm, one lens fit, bfloat16,
+single-token atoms, no training.
 
 ## Corpus provenance
 
