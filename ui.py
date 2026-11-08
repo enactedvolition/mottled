@@ -26,6 +26,7 @@ import statefile as statefile_mod
 from config import (
     DEFAULT_PROMPT,
     DENSITY_CHOICES,
+    GAUGE_CHOICES,
     MODEL_CHOICES,
     PROJECTION_CHOICES,
     TRAJECTORY_MODES,
@@ -275,6 +276,12 @@ def main() -> None:
                      "each spends outside it kept visible. Overrides the overlay "
                      "prompts above.")
         proj_name = st.selectbox("Projection", PROJECTION_CHOICES, key="projection")
+        gauge = st.selectbox("Gauge", GAUGE_CHOICES, key="gauge",
+                             help="What the projection is fitted on. none: the raw "
+                                  "states, where an attention sink or the growth of "
+                                  "the norm with depth can decide both axes. rms: "
+                                  "each state at unit RMS. center: each layer's mean "
+                                  "removed. rms+center: both.")
         dens_name = st.selectbox("Density estimator", DENSITY_CHOICES, key="density")
         top_k = st.slider("Top-k", 1, 10, 5, key="top_k")
         lens = st.selectbox("Readout lens", ["logit", "tuned"], key="lens",
@@ -325,7 +332,8 @@ def main() -> None:
         st.caption("Play, pause and scrub inside the figure animate the marble; "
                    "the layer slider below drives the inspector.")
 
-    asked = MarbleConfig(model=model_name, projection=proj_name, density=dens_name,
+    asked = MarbleConfig(model=model_name, projection=proj_name, gauge=gauge,
+                         density=dens_name,
                          top_k=top_k, trajectory_mode=mode, invert_terrain=invert,
                          generate_tokens=gen_tokens, generate_temperature=gen_temp,
                          lens=lens)
@@ -642,6 +650,12 @@ def main() -> None:
             if projector is None or not hasattr(projector, "inverse_transform"):
                 st.caption("The feature field needs an invertible projection — "
                            "re-run with projection = pca.")
+            elif cfg.gauge != "none":
+                # the plane inverts into the gauged space, which is not the
+                # residual stream a dictionary was trained on
+                st.caption("The feature field inverts the plane into the gauged "
+                           "states, not the residual stream the SAE reads — "
+                           "re-run with gauge = none.")
             else:
                 if cfg.projection != "pca":
                     st.caption("Projection is umap: its inverse is approximate, so "
@@ -772,7 +786,9 @@ def main() -> None:
             if q is not None:
                 if q.explained_variance is not None:
                     st.write(f"projection keeps **{q.explained_variance:.0%}** "
-                             "of hidden-space variance")
+                             "of hidden-space variance"
+                             + ("" if cfg.gauge == "none" else
+                                f" (after the {cfg.gauge} gauge)"))
                 basis = projection_mod.fidelity_basis(q)
                 if basis.metric == "within-layer":
                     st.write(f"within-layer neighborhood preservation (k={basis.k}, "

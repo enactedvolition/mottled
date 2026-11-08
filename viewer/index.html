@@ -75,6 +75,14 @@
     </details>
   </div>
   <div id="comparisons"></div>
+  <div id="curves" hidden>
+    <div id="curveKinds" class="seg" role="group" aria-label="curve"></div>
+    <label id="curve-token-row" hidden><span class="dim">token</span>
+      <select id="curveToken"></select></label>
+    <svg id="curvePlot" viewBox="0 0 280 120" role="img" aria-label="per-layer curve"></svg>
+    <div id="curveValues" class="mono"></div>
+    <div id="curveNote" class="dim"></div>
+  </div>
   <label id="attn-row" hidden><input type="checkbox" id="attnToggle"> attention flow</label>
   <label id="uncertainty-row" hidden><input type="checkbox" id="uncertaintyToggle"> uncertainty (density SE)</label>
 </div>

@@ -235,7 +235,11 @@ Fields:
     should say so rather than display them as measurement.
 - `comparisons` *(optional)*: for runs beyond the first, JSON summaries:
   `{ "label", "hausdorff", "dtw_normalized", "shared_tokens", "onset_layer",
-     "readout_changed" }`.
+     "readout_changed", "relative", "cosine" }`. `relative` and `cosine` are
+  `(L,)` float32 array refs, per layer at the compared (final) token in full
+  hidden space against run 0: `|h_b - h_a| / |h_a|` and the cosine of the two
+  states. They need no projection, so they are the divergence a viewer can
+  show without a fidelity caveat. Absent from scenes written before them.
 - `blast` *(optional)*: a **pellet family** (`blast.py`, `mottled
   export-blast`): one pellet per prompt, read at one position, at every
   layer. The scene keeps every required field, so a reader without this

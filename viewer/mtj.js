@@ -210,8 +210,18 @@
     });
     if (!runs.length) throw new Error("corrupt scene: no runs");
 
-    return { manifest, arrays, meta: manifest.meta || {}, terrain, runs,
-             comparisons: manifest.comparisons || [],
+    // Optional per-layer divergence curves on each comparison (statefile.
+    // save_scene): the compared token's |h_b - h_a| / |h_a| and cosine against
+    // run 0, in full hidden space. A missing, non-string, dangling or
+    // non-1-D ref reads null and the viewer draws no curve for it.
+    const curve = (ref) => {
+      const a = typeof ref === "string" ? arrays[ref] || null : null;
+      return a && a.shape.length === 1 ? a : null;
+    };
+    const comparisons = (Array.isArray(manifest.comparisons) ? manifest.comparisons : [])
+      .map((c) => ({ ...c, relative: curve(c && c.relative), cosine: curve(c && c.cosine) }));
+
+    return { manifest, arrays, meta: manifest.meta || {}, terrain, runs, comparisons,
              blast: resolveBlast(manifest.blast, manifest.meta, arrays, runs[0]) };
   }
 
@@ -610,7 +620,76 @@
     };
   }
 
+  // ---- per-layer curves at the final token ----------------------------
+  // compare.compare reads each run at its final token, and the readout
+  // curves read the same one, so every curve in the panel is one position.
+
+  // the final position's top-k at layer l, or null
+  const finalTopk = (run, l) => {
+    const layer = run && Array.isArray(run.topk) ? run.topk[l] : null;
+    const state = Array.isArray(layer) ? layer[layer.length - 1] : null;
+    return Array.isArray(state) && state.length ? state : null;
+  };
+
+  /* The tokens a readout curve can follow: everything in any run's
+   * final-layer top-k at its final position, the most probable first (by
+   * the highest probability any run gives it there). */
+  function readoutTokens(runs) {
+    const best = new Map();
+    for (const r of runs || []) {
+      const top = r && Array.isArray(r.topk) ? finalTopk(r, r.topk.length - 1) : null;
+      for (const [tok, p] of top || [])
+        if (typeof p === "number" && !(best.get(tok) >= p)) best.set(tok, p);
+    }
+    return [...best.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }
+
+  /* One run's readout of `token` at its final position, per layer, from the
+   * per-state top-k the scene carries. Where the token is outside the top-k
+   * nothing was recorded: `p` is NaN there and `ceiling` holds the k-th
+   * probability, the most it can be. Null for a run without a top-k. */
+  function readoutCurve(run, token) {
+    if (!run || !Array.isArray(run.topk) || !run.topk.length) return null;
+    const L = run.topk.length;
+    const p = new Float64Array(L).fill(NaN), ceiling = new Float64Array(L).fill(NaN);
+    for (let l = 0; l < L; l++) {
+      const top = finalTopk(run, l);
+      if (!top) continue;
+      const hit = top.find((e) => e[0] === token);
+      if (hit && typeof hit[1] === "number") p[l] = hit[1];
+      else if (!hit && typeof top[top.length - 1][1] === "number") ceiling[l] = top[top.length - 1][1];
+    }
+    return { p, ceiling };
+  }
+
+  /* The series the curves panel draws, as data: {run, values} per run, NaN
+   * where nothing was recorded. "distance" and "cosine" are the comparisons'
+   * hidden-space curves, one per run after the first; "readout" is `token`
+   * read at every run's final position, each series with its `ceiling`.
+   * Null when the scene has nothing to draw for `kind`. */
+  function curveSeries(scene, kind, token) {
+    const runs = (scene && scene.runs) || [];
+    const out = [];
+    if (kind === "readout") {
+      runs.forEach((r, i) => {
+        const c = readoutCurve(r, token);
+        if (c) out.push({ run: i, values: c.p, ceiling: c.ceiling });
+      });
+      return out.length ? out : null;
+    }
+    const key = kind === "cosine" ? "cosine" : "relative";
+    const comps = (scene && scene.comparisons) || [];
+    // run 0 against each later run, in order; a scene whose runs differ in
+    // depth carries fewer, and there is no layer-for-layer pairing to draw
+    if (comps.length !== runs.length - 1) return null;
+    comps.forEach((c, j) => {
+      if (c && c[key] && c[key].data) out.push({ run: j + 1, values: Float64Array.from(c[key].data) });
+    });
+    return out.length ? out : null;
+  }
+
   return { parse, loadScene, decodeFloat16, SUPPORTED_VERSION,
+           readoutTokens, readoutCurve, curveSeries,
            isGeneratedToken, generationStep, continuationText, decodeSummary,
            generationBoundary, featureAt, featureFitSummary,
            neighborsAt, componentShareAt,

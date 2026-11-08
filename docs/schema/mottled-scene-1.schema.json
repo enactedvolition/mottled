@@ -240,6 +240,18 @@
               "integer",
               "null"
             ]
+          },
+          "relative": {
+            "type": "string",
+            "minLength": 1,
+            "x-mtj-array": true,
+            "description": "(layers,) |h_b - h_a| / |h_a| at the compared token, hidden space"
+          },
+          "cosine": {
+            "type": "string",
+            "minLength": 1,
+            "x-mtj-array": true,
+            "description": "(layers,) cosine of h_a and h_b at the compared token, hidden space"
           }
         }
       }

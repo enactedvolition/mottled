@@ -109,6 +109,8 @@ class TrajectoryComparison:
     dtw: DTWResult                # time-warped alignment of compared paths
     profile: np.ndarray           # (L,) pointwise distance at the compared token
     positionwise: np.ndarray      # (L, min(Ta, Tb)) hidden-space distance per state
+    relative: np.ndarray          # (L,) |h_b - h_a| / |h_a| at the compared token
+    cosine: np.ndarray            # (L,) cosine of h_a and h_b at the compared token
     onset_token: int | None       # first aligned position whose states separate
     onset_layer: int              # first layer the compared token's distance exceeds the band
     readout_changed: int | None   # first layer the top-1 logit-lens prediction differs
@@ -128,8 +130,8 @@ def compare(
     Geometry (Hausdorff / DTW / profile) is measured over the compared
     token's path — in the shared projected space when `coords_a`/`coords_b`
     (both (L, T, C), e.g. from `projection.project_joint`) are given,
-    otherwise in full hidden space.  Alignment and `positionwise` always use
-    hidden space.  `onset_*` use the same relative band as
+    otherwise in full hidden space.  Alignment, `positionwise`, `relative`
+    and `cosine` always use hidden space.  `onset_*` use the same relative band as
     `intervene.divergence`: the first index whose distance exceeds `rel`
     times the maximum separation.
     """
@@ -160,6 +162,16 @@ def compare(
         exceed = np.flatnonzero(dist > rel * peak)
         return int(exceed[0]) if exceed.size else None
 
+    # The compared token's divergence in hidden space, in units no projection
+    # stands between: the norm grows with depth, so an absolute distance
+    # mostly says which layer it was taken at; relative to A's state and as
+    # a cosine it says how far B has moved from A at that layer.
+    h_a = traj_a.hidden[:, t_a].astype(np.float64)
+    h_b = traj_b.hidden[:, t_b].astype(np.float64)
+    n_a, n_b = np.linalg.norm(h_a, axis=-1), np.linalg.norm(h_b, axis=-1)
+    relative = np.linalg.norm(h_b - h_a, axis=-1) / np.maximum(n_a, _EPS)
+    cosine = (h_a * h_b).sum(axis=-1) / np.maximum(n_a * n_b, _EPS)
+
     onset_token = _onset(positionwise.max(axis=0))
     onset_layer = _onset(profile)
     onset_layer = len(profile) - 1 if onset_layer is None else onset_layer
@@ -178,6 +190,8 @@ def compare(
         dtw=dtw(path_a, path_b),
         profile=profile.astype(np.float32),
         positionwise=positionwise.astype(np.float32),
+        relative=relative.astype(np.float32),
+        cosine=cosine.astype(np.float32),
         onset_token=onset_token,
         onset_layer=onset_layer,
         readout_changed=readout_changed,

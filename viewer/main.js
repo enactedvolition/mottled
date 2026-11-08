@@ -207,6 +207,9 @@ const state = {
   // blast scenes only: which layout is drawn, the label pellets are coloured
   // by, and the label the reader picked (null until they pick one)
   blast: null,
+  // the curves panel: which kind is drawn, the token a readout follows
+  curves: null,
+  runColors: [],
   cam: { theta: -2.2, phi: 0.65, dist: 10, target: [0, 0, 0] },
   mouse: null,
 };
@@ -419,6 +422,7 @@ function setScene(scene) {
   // A blast opens at its deepest layer: at layer 0 the pellets can all be one
   // point, and the spread with depth is what the scene is for.
   state.blast = scene.blast ? { layout: 0, colour: null, chosen: null, shownLayer: -1 } : null;
+  state.curves = null;      // the last scene's kind and token may not exist here
   if (state.blast) { state.layerF = state.L - 1; applyBlastLayout(); }
 
   // Real-model scenes span hundreds of units in x/y while terrain height is
@@ -880,6 +884,13 @@ const ui = {
   runsPanel: document.getElementById("runs-panel"),
   runsList: document.getElementById("runs-list"),
   comparisons: document.getElementById("comparisons"),
+  curves: document.getElementById("curves"),
+  curveKinds: document.getElementById("curveKinds"),
+  curveTokenRow: document.getElementById("curve-token-row"),
+  curveToken: document.getElementById("curveToken"),
+  curvePlot: document.getElementById("curvePlot"),
+  curveValues: document.getElementById("curveValues"),
+  curveNote: document.getElementById("curveNote"),
   attnRow: document.getElementById("attn-row"),
   attnToggle: document.getElementById("attnToggle"),
   uncertaintyRow: document.getElementById("uncertainty-row"),
@@ -924,8 +935,10 @@ function buildUI(scene) {
 
   ui.runsList.innerHTML = "";
   let colorBase = 0;
+  state.runColors = [];
   scene.runs.forEach((run, i) => {
     const sw = PALETTE[colorBase % PALETTE.length];
+    state.runColors.push(sw);
     colorBase += run.points.shape[0];
     const label = document.createElement("label");
     const cb = document.createElement("input");
@@ -966,6 +979,7 @@ function buildUI(scene) {
         `<tr><td><b>${esc(c.label ?? "?")}</b></td><td>${fmt(c.hausdorff)}</td>` +
         `<td>${fmt(c.dtw_normalized)}</td><td>${esc(c.shared_tokens ?? "–")}</td></tr>`).join("") + "</table>";
   } else ui.comparisons.innerHTML = "";
+  renderCurves();
 
   const hasAttn = scene.runs.some((r) => r.attention);
   ui.attnRow.hidden = !hasAttn;
@@ -1021,7 +1035,8 @@ function renderReading(scene, keepOpen) {
       esc(m.id) + (m.revision ? ` <span class="mono dim">@${esc(m.revision.slice(0, 7))}</span>` : "")
     ).join(", ");
     const bits = [`${esc(p.prompts)} prompt${p.prompts === 1 ? "" : "s"}`];
-    if (p.projection) bits.push(`${esc(p.projection)} projection`);
+    if (p.projection) bits.push(`${esc(p.projection)} projection` +
+                                (p.gauge !== "none" ? ` of ${esc(p.gauge)}-gauged states` : ""));
     if (p.density) bits.push(`${esc(p.density)} density`);
     if (p.seed !== null) bits.push(`seed ${esc(p.seed)}`);
     bits.push(p.lens === "logit" ? "logit lens" : "tuned lens");
@@ -1044,6 +1059,121 @@ function renderReading(scene, keepOpen) {
 }
 
 const fmt = (v) => (typeof v === "number" ? v.toFixed(3) : "–");
+
+// ---------------------------------------------------------------- curves
+// The map is a projection, with the fidelity caveats the reading panel
+// spells out. These curves are read straight from the scene's hidden-space
+// comparisons and its per-state top-k, so no projection stands between them
+// and the states — they are what to read first when runs are compared.
+const CURVE_KINDS = {
+  distance: "|h \u2212 h_A| / |h_A| at each run's final token, in full hidden " +
+            "space: how far a run's state is from run A's at each layer, " +
+            "relative to A's own size.",
+  cosine: "Cosine of h and h_A at each run's final token, in full hidden space.",
+  readout: null,                     // per scene: it names the lens and the k
+};
+const CURVE_BOX = { w: 280, h: 120, l: 34, r: 6, t: 6, b: 16 };
+const fmtCurve = (v) => String(Number(v.toPrecision(3)));
+
+function renderCurves() {
+  const scene = state.scene;
+  const tokens = scene.blast ? [] : MTJ.readoutTokens(scene.runs);
+  const kinds = scene.blast ? [] : Object.keys(CURVE_KINDS)
+    .filter((k) => MTJ.curveSeries(scene, k, tokens[0]));
+  ui.curves.hidden = !kinds.length;
+  if (!kinds.length) { state.curves = null; return; }
+  if (!state.curves) state.curves = { kind: kinds[0], token: tokens[0] };
+  ui.curveKinds.innerHTML = "";
+  for (const k of kinds) {
+    const btn = document.createElement("button");
+    btn.className = "seg-btn";
+    btn.textContent = k;
+    btn.setAttribute("aria-pressed", String(k === state.curves.kind));
+    btn.addEventListener("click", () => { state.curves.kind = k; renderCurves(); });
+    ui.curveKinds.appendChild(btn);
+  }
+  ui.curveTokenRow.hidden = state.curves.kind !== "readout";
+  // quoted, so the leading space a BPE piece carries stays visible
+  ui.curveToken.innerHTML = tokens
+    .map((t) => `<option value="${esc(t)}">${esc(JSON.stringify(t))}</option>`).join("");
+  ui.curveToken.value = state.curves.token;
+  drawCurves();
+}
+
+function drawCurves() {
+  const c = state.curves, B = CURVE_BOX;
+  const series = MTJ.curveSeries(state.scene, c.kind, c.token) || [];
+  const L = Math.max(1, ...series.map((s) => s.values.length));
+  let lo = Infinity, hi = -Infinity;
+  for (const s of series)
+    for (const arr of [s.values, s.ceiling || []])
+      for (const v of arr) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  if (c.kind !== "cosine") lo = 0;      // a distance and a probability start at 0
+  if (!(hi > lo)) hi = lo + 1;
+  const x = (l) => B.l + (L > 1 ? l / (L - 1) : 0) * (B.w - B.l - B.r);
+  const y = (v) => B.t + (1 - (v - lo) / (hi - lo)) * (B.h - B.t - B.b);
+  const tick = Math.max(1, 0.3 * (B.w - B.l - B.r) / L);
+  const parts = [
+    `<text x="${B.l - 4}" y="${B.t + 7}" text-anchor="end">${fmtCurve(hi)}</text>`,
+    `<text x="${B.l - 4}" y="${B.h - B.b}" text-anchor="end">${fmtCurve(lo)}</text>`,
+    `<text x="${B.l}" y="${B.h - 3}">0</text>`,
+    `<text x="${(B.l + B.w - B.r) / 2}" y="${B.h - 3}" text-anchor="middle">layer</text>`,
+    `<text x="${B.w - B.r}" y="${B.h - 3}" text-anchor="end">${L - 1}</text>`,
+    `<line class="axis" x1="${B.l}" x2="${B.w - B.r}" y1="${B.h - B.b}" y2="${B.h - B.b}"/>`,
+  ];
+  for (const s of series) {
+    const col = state.runColors[s.run] || "currentColor";
+    let d = "", pen = false;
+    s.values.forEach((v, l) => {
+      if (!Number.isFinite(v)) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${x(l).toFixed(1)} ${y(v).toFixed(1)}`;
+      pen = true;
+      // a readout is often recorded at isolated layers, which a path alone
+      // would not show
+      if (s.ceiling) parts.push(`<circle cx="${x(l).toFixed(1)}" cy="${y(v).toFixed(1)}" r="1.6" fill="${col}"/>`);
+    });
+    parts.push(`<path d="${d}" stroke="${col}"/>`);
+    // outside the top-k only the k-th probability is known: a tick at that
+    // ceiling, never a point the token was read at
+    if (s.ceiling) s.ceiling.forEach((v, l) => {
+      if (Number.isFinite(v)) parts.push(
+        `<line class="ceiling" x1="${(x(l) - tick).toFixed(1)}" x2="${(x(l) + tick).toFixed(1)}" ` +
+        `y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${col}"/>`);
+    });
+  }
+  parts.push(`<line class="marker" y1="${B.t}" y2="${B.h - B.b}"/>`);
+  ui.curvePlot.innerHTML = parts.join("");
+  Object.assign(c, { series, x, shownLayer: -1 });
+
+  let note = CURVE_KINDS[c.kind];
+  if (c.kind === "readout") {
+    const top = state.scene.runs.map((r) => r.topk && r.topk[0] && r.topk[0][r.topk[0].length - 1])
+      .find((t) => Array.isArray(t));
+    note = `${window.Reading ? window.Reading.readoutLabel(state.scene) : "logit lens"}: ` +
+      `the probability of ${JSON.stringify(c.token)} at each run's final token — a readout ` +
+      `diagnostic, not the model's belief. A tick marks a layer where it fell outside ` +
+      `the top-${top ? top.length : "k"}, so only its ceiling, the ${top ? top.length : "k"}th ` +
+      `probability, is recorded.`;
+  }
+  ui.curveNote.textContent = note;
+  renderCurveLayer();
+}
+
+// the marker and the values at the scrubbed layer; onLayerChanged calls this
+// only when the integer layer changes
+function renderCurveLayer() {
+  const c = state.curves;
+  if (!c || !c.series) return;
+  const l = Math.floor(state.layerF);
+  c.shownLayer = l;
+  const m = ui.curvePlot.querySelector(".marker");
+  if (m) { m.setAttribute("x1", c.x(l)); m.setAttribute("x2", c.x(l)); }
+  ui.curveValues.innerHTML = `<span class="dim">layer ${l}</span> ` + c.series.map((s) => {
+    const v = s.values[l], cap = s.ceiling ? s.ceiling[l] : NaN;
+    const text = Number.isFinite(v) ? fmtCurve(v) : Number.isFinite(cap) ? `\u2264${fmtCurve(cap)}` : "\u2013";
+    return `<span style="color:${state.runColors[s.run]}">${esc(state.scene.runs[s.run].label)}</span> ${text}`;
+  }).join(" <span class=\"dim\">\u00b7</span> ");
+}
 
 // ---------------------------------------------------------------- blast
 // A blast scene (blast.py) is one pellet per prompt, drawn flat under one of
@@ -1221,6 +1351,7 @@ function onLayerChanged(fromSlider) {
   ui.layerLabel.textContent = `layer ${l} / ${state.L - 1}`;
   if (l !== state._lastAttnLayer) { state._lastAttnLayer = l; rebuildAttention(); }
   if (state.blast && l !== state.blast.shownLayer) renderBlastReadout();
+  if (state.curves && l !== state.curves.shownLayer) renderCurveLayer();
 }
 
 ui.layerSlider.addEventListener("input", () => { state.playing = false; ui.playBtn.innerHTML = "&#9654;"; onLayerChanged(true); });
@@ -1235,6 +1366,9 @@ ui.uncertaintyToggle.addEventListener("change", () => {
   setTerrainColors(state.showUncertainty);
 });
 ui.blastColour.addEventListener("change", () => setBlastColour(ui.blastColour.value));
+ui.curveToken.addEventListener("change", () => {
+  if (state.curves) { state.curves.token = ui.curveToken.value; drawCurves(); }
+});
 ui.openBtn.addEventListener("click", () => ui.fileInput.click());
 ui.fileInput.addEventListener("change", () => {
   if (ui.fileInput.files[0]) loadBlob(ui.fileInput.files[0], ui.fileInput.files[0].name);

@@ -121,10 +121,11 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
     traj = _capture_with(cfg, prompt, model=model, tokenizer=tokenizer,
                          input_ids=input_ids)
 
+    space = projection_mod.gauge([traj.hidden], cfg.gauge)[0]
     coords, projector = projection_mod.project(
-        traj.hidden, method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed
+        space, method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed
     )
-    quality = projection_mod.projection_quality(traj.hidden, coords, projector)
+    quality = projection_mod.projection_quality(space, coords, projector)
     landscape = density_mod.compute_density(
         coords, method=cfg.density, grid_size=cfg.grid_size, padding=cfg.grid_padding,
         bootstrap=cfg.density_bootstrap, seed=cfg.seed,
@@ -229,13 +230,13 @@ def chat_reply(tokenizer, traj: StateTrajectory) -> str:
 def _assemble_scene(cfg: MarbleConfig, trajs: list[StateTrajectory]) -> dict:
     """Shared multi-run assembly: joint projection, one terrain from the
     union of all runs' states, draped trajectories, comparisons vs run 0."""
+    spaces = projection_mod.gauge([t.hidden for t in trajs], cfg.gauge)
     coords_list, projector = projection_mod.project_joint(
-        [t.hidden for t in trajs],
-        method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed,
+        spaces, method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed,
     )
     quality_list = [
-        projection_mod.projection_quality(t.hidden, c, projector)
-        for t, c in zip(trajs, coords_list)
+        projection_mod.projection_quality(s, c, projector)
+        for s, c in zip(spaces, coords_list)
     ]
     union = np.concatenate([c.reshape(-1, cfg.n_components) for c in coords_list])
     landscape = density_mod.compute_density(

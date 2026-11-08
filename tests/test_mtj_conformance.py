@@ -77,6 +77,29 @@ def test_python_writer_decodes_in_js_viewer(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_divergence_curves_decode_in_js_viewer(tmp_path):
+    """The per-layer comparison curves read the same in the viewer as in
+    Python, and the series the curves panel draws are those values."""
+    path = _scene(tmp_path)
+    script = r"""
+      const MTJ = require(process.argv[1]);
+      const scene = MTJ.loadScene(require("fs").readFileSync(process.argv[2]));
+      const c = scene.comparisons[0];
+      const series = MTJ.curveSeries(scene, "distance");
+      process.stdout.write(JSON.stringify({
+        relative: Array.from(c.relative.data), cosine: Array.from(c.cosine.data),
+        series: series.map((s) => [s.run, Array.from(s.values)]) }));
+    """
+    js = json.loads(subprocess.run(
+        ["node", "-e", script, str(ROOT / "viewer" / "mtj.js"), str(path)],
+        capture_output=True, text=True, check=True).stdout)
+    py = statefile.load_scene(path)["comparisons"][0]
+    assert js["relative"] == py["relative"].tolist()      # float32 both sides: exact
+    assert js["cosine"] == py["cosine"].tolist()
+    assert js["series"] == [[1, py["relative"].tolist()]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_layer_fidelity_decodes_in_js_viewer(tmp_path):
     """The within-layer fidelity record (what the low-fidelity flag reads)
     reads the same in the viewer as in Python, and a run too short to carry

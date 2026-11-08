@@ -129,6 +129,11 @@ def test_scene_roundtrip(tmp_path, scene_result):
     cmp = scene["comparisons"][0]
     assert cmp["label"] == "B"
     assert cmp["hausdorff"] == pytest.approx(scene_result["comparisons"][0].hausdorff)
+    # the per-layer divergence curves travel as arrays, not summaries
+    assert np.array_equal(cmp["relative"], scene_result["comparisons"][0].relative)
+    assert np.array_equal(cmp["cosine"], scene_result["comparisons"][0].cosine)
+    import mtjschema
+    assert mtjschema.validate_bytes(path.read_bytes(), strict=True) == []
 
 
 def test_scene_carries_uncertainty_layers(tmp_path, scene_result):

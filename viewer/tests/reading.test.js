@@ -160,6 +160,12 @@ test("a record without a lens predates the tuned lens: it was the raw lens", () 
   assert.strictEqual(R.sceneSummary(scene({ analysis: tuned })).provenance.lens, "tuned");
 });
 
+test("a record without a gauge predates it: the raw states were projected", () => {
+  assert.strictEqual(R.sceneSummary(scene({ analysis: RECORD })).provenance.gauge, "none");
+  const gauged = { ...RECORD, config: { ...RECORD.config, gauge: "rms+center" } };
+  assert.strictEqual(R.sceneSummary(scene({ analysis: gauged })).provenance.gauge, "rms+center");
+});
+
 test("the inspector names the readout, and cautions the raw lens", () => {
   assert.match(R.readoutLabel(scene({ analysis: RECORD })), /^logit lens .*early layers/);
   // no record at all: every producer that writes none reads through the raw lens
