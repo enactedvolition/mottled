@@ -153,7 +153,11 @@ def scene_schema() -> dict:
                        "dtw_normalized": _NULLABLE_NUMBER,
                        "shared_tokens": {"type": "integer"},
                        "onset_layer": {"type": "integer"},
-                       "readout_changed": {"type": ["integer", "null"]}},
+                       "readout_changed": {"type": ["integer", "null"]},
+                       "relative": {**_REF, "description": "(layers,) |h_b - h_a| / "
+                                    "|h_a| at the compared token, hidden space"},
+                       "cosine": {**_REF, "description": "(layers,) cosine of h_a and "
+                                  "h_b at the compared token, hidden space"}},
     }
     return {
         "$schema": DIALECT,

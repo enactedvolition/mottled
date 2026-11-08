@@ -1,5 +1,7 @@
 """Phase 2 — trajectory comparison: geometry, alignment, A/B pipeline."""
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -132,6 +134,28 @@ def test_compare_ab_prompts():
     assert np.isfinite(cmp.positionwise).all()
     assert cmp.onset_token is not None
     assert 0 <= cmp.onset_layer < ta.n_layers
+
+
+def test_compare_divergence_curves_are_hidden_space_and_scale_free():
+    ta = synthetic.capture(PROMPT_A)
+    tb = synthetic.capture(PROMPT_B)
+    (ca, cb), _ = project_joint([ta.hidden, tb.hidden])
+    cmp = C.compare(ta, tb, ca, cb)
+    h_a = ta.hidden[:, -1].astype(np.float64)
+    h_b = tb.hidden[:, -1].astype(np.float64)
+    np.testing.assert_allclose(
+        cmp.relative, np.linalg.norm(h_b - h_a, axis=1) / np.linalg.norm(h_a, axis=1), rtol=1e-5)
+    np.testing.assert_allclose(
+        cmp.cosine, (h_a * h_b).sum(1) / np.linalg.norm(h_a, axis=1) / np.linalg.norm(h_b, axis=1),
+        rtol=1e-5)
+    # the projection does not enter them, and neither does a common scale
+    same = C.compare(ta, tb)
+    assert np.array_equal(same.relative, cmp.relative) and np.array_equal(same.cosine, cmp.cosine)
+    scaled = C.compare(replace(ta, hidden=ta.hidden * 7), replace(tb, hidden=tb.hidden * 7))
+    np.testing.assert_allclose(scaled.relative, cmp.relative, rtol=1e-5)
+    np.testing.assert_allclose(scaled.cosine, cmp.cosine, rtol=1e-5)
+    self_cmp = C.compare(ta, ta)
+    assert np.allclose(self_cmp.relative, 0.0) and np.allclose(self_cmp.cosine, 1.0)
 
 
 def test_compare_requires_commensurable_runs():

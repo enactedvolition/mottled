@@ -135,6 +135,10 @@ def test_project_takes_policy_from_flags_config_and_set(tmp_path, model_dir):
                      "--set", "smooth_sigma=0.5", "-o", str(out)]) == 0
     rec = statefile.load_scene(out)["analysis"]["config"]
     assert (rec["grid_size"], rec["density_bootstrap"], rec["smooth_sigma"]) == (24, 0, 0.5)
+    assert rec["gauge"] == "none"
+    gauged = tmp_path / "g.mtj"
+    assert cli.main(["project", str(traj), "--gauge", "rms+center", "-o", str(gauged)]) == 0
+    assert statefile.load_scene(gauged)["analysis"]["config"]["gauge"] == "rms+center"
     # capture-stage settings come from the trajectory, not from defaults
     assert rec["model"] == model_dir
     assert statefile.load_scene(out)["terrain"]["z"].shape == (24, 24)

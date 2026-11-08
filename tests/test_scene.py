@@ -5,7 +5,7 @@ import pytest
 
 from config import MarbleConfig
 import tiny as synthetic
-from ui import render, run_compare, run_intervention, run_scene
+from ui import render, run_compare, run_intervention, run_pipeline, run_scene
 
 PROMPTS = ["the capital of france is",
            "the capital of germany is",
@@ -98,6 +98,28 @@ def test_scene_cache_roundtrip_and_compare_alias(cfg, scene):
     assert pair["traj_b"] is pair["trajs"][1]
     assert pair["comparison"] is pair["comparisons"][0]
     assert pair["prompt_b"] == PROMPTS[1]
+
+
+def test_gauge_is_what_the_scene_projects_and_measures():
+    from dataclasses import replace
+
+    from sklearn.decomposition import PCA
+
+    import projection
+    cfg = MarbleConfig(model="tiny", use_cache=False, gauge="rms+center", density_bootstrap=0)
+    gauged = run_scene(cfg, PROMPTS, **synthetic.mt())
+    raw = run_scene(replace(cfg, gauge="none"), PROMPTS, **synthetic.mt())
+    spaces = projection.gauge([t.hidden for t in gauged["trajs"]], "rms+center")
+    union = np.concatenate([g.reshape(-1, g.shape[-1]) for g in spaces]).astype(np.float64)
+    # fidelity is measured on the states that were projected, not the raw ones
+    ev = PCA(2, svd_solver="full").fit(union).explained_variance_ratio_.sum()
+    assert gauged["quality_list"][0].explained_variance == pytest.approx(ev, rel=1e-6)
+    assert not np.allclose(gauged["coords_list"][1], raw["coords_list"][1])
+    # the divergence curves are read in hidden space, so no gauge moves them
+    assert np.array_equal(gauged["comparisons"][0].relative, raw["comparisons"][0].relative)
+    one = run_pipeline(cfg, PROMPTS[0], **synthetic.mt())
+    expect, _ = projection.project(projection.gauge([one["traj"].hidden], "rms+center")[0])
+    assert np.array_equal(one["coords"], expect)
 
 
 def test_scene_requires_prompts(cfg):

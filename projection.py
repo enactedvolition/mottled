@@ -123,6 +123,48 @@ class UMAPProjection:
             dtype=np.float32)
 
 
+GAUGES = ("none", "rms", "center", "rms+center")
+
+
+def gauge(hiddens: list[np.ndarray], kind: str = "none") -> list[np.ndarray]:
+    """The states a projection is fitted on, with what would otherwise
+    decide its axes taken out first.
+
+    Two things fill a PCA of raw residual states before anything a prompt
+    changes can. A few attention-sink states carry norms hundreds of times
+    the rest's: on Qwen2.5-1.5B, position 0 sits near 11,000 against a median
+    near 54 and, at 4% of the states, holds 97% of the 2-D spread. And
+    norms grow with depth, so with the sink gone PC1 is a layer axis
+    (correlation 0.94 with the norm on the same states).
+
+    "rms" divides each state by its root-mean-square, the scale the next
+    RMSNorm removes, so no state outweighs another by size alone. "center"
+    subtracts each layer's mean over every run's states, so depth is not an
+    axis. "rms+center" does both, in that order; "none" returns the states
+    as given. The map then shows these states, not the raw stream, so
+    fidelity has to be measured against them too.
+    """
+    if kind not in GAUGES:
+        raise ValueError(f"unknown gauge {kind!r}; available: {list(GAUGES)}")
+    arrays = [np.asarray(h) for h in hiddens]
+    if kind == "none":
+        return arrays
+    out = [a.astype(np.float64) for a in arrays]
+    if "rms" in kind:
+        for i, a in enumerate(out):
+            r = np.sqrt((a * a).mean(axis=-1, keepdims=True))
+            out[i] = a / np.where(r > 0, r, 1.0)
+    if "center" in kind:
+        if len({a.shape[0] for a in out}) > 1:
+            # layer l of a 13-layer run and of a 7-layer one are not the
+            # same depth, so a mean over both would centre neither
+            raise ValueError("per-layer centering needs runs of the same depth")
+        mean = (sum(a.sum(axis=1) for a in out)
+                / sum(a.shape[1] for a in out))[:, None, :]
+        out = [a - mean for a in out]
+    return [o.astype(a.dtype) for o, a in zip(out, arrays)]
+
+
 def project(
     hidden: np.ndarray,
     method: str = "pca",

@@ -141,6 +141,19 @@ button:active { transform: translateY(1px); }
   font-weight: normal; }
 #comparisons th { color: var(--color-fg-2); font-family: "DM Sans", -apple-system,
   sans-serif; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
+/* per-layer curves: hidden-space divergence and readout, no projection */
+#curves { margin-top: 8px; border-top: 1px solid var(--color-border); padding-top: 8px;
+  font-size: 11px; }
+#curve-token-row { display: block; margin-bottom: 4px; }
+#curve-token-row[hidden] { display: none; }  /* the block above would override hidden */
+#curvePlot { display: block; width: 100%; height: auto; }
+#curvePlot text { fill: var(--color-fg-2); font-size: 9px; }
+#curvePlot path { fill: none; stroke-width: 1.4; }
+#curvePlot .axis { stroke: var(--color-border-strong); }
+#curvePlot .ceiling { stroke-width: 1; opacity: 0.6; }
+#curvePlot .marker { stroke: var(--color-fg-2); stroke-dasharray: 2 2; }
+#curveValues { margin-top: 2px; }
+#curveNote { margin-top: 4px; line-height: 1.35; }
 #attn-row { display: block; margin-top: 10px; border-top: 1px solid var(--color-border);
   padding-top: 8px; cursor: pointer; }
 #attn-row input { accent-color: var(--color-accent); }

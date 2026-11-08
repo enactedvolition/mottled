@@ -262,3 +262,61 @@ test("float16 arrays decode to Float32Array", () => {
   assert.ok(arrays.h.data instanceof Float32Array);
   assert.deepStrictEqual(Array.from(arrays.h.data), [1, -2, 0.5]);
 });
+
+// ---- per-layer curves ---------------------------------------------------
+
+test("an older scene has no divergence curves but can still draw a readout", () => {
+  const scene = MTJ.loadScene(read("scene-abc.mtj"));
+  assert.strictEqual(scene.comparisons[0].relative, null);
+  assert.strictEqual(MTJ.curveSeries(scene, "distance"), null);
+  const tokens = MTJ.readoutTokens(scene.runs);
+  assert.ok(tokens.length > 0);
+  const series = MTJ.curveSeries(scene, "readout", tokens[0]);
+  assert.deepStrictEqual(series.map((s) => [s.run, s.values.length]), [[0, 13], [1, 13], [2, 13]]);
+});
+
+test("comparison curves resolve to arrays, and a bad ref reads null", () => {
+  const scene = (comparisons, nRuns = 2) => MTJ.loadScene(buildMtj({
+    manifest: {
+      format: "mottled-trajectory", version: 1, kind: "scene",
+      terrain: { x: "x", y: "y", z: "z" },
+      runs: Array.from({ length: nRuns }, (_, i) =>
+        ({ label: "AB"[i] || "C", tokens: ["a"], points: "pts" })),
+      comparisons,
+      arrays: {
+        x: { dtype: "float32", shape: [2], offset: 0, length: 8 },
+        y: { dtype: "float32", shape: [2], offset: 16, length: 8 },
+        z: { dtype: "float32", shape: [2, 2], offset: 32, length: 16 },
+        pts: { dtype: "float32", shape: [1, 2, 3], offset: 48, length: 24 },
+        rel: { dtype: "float32", shape: [2], offset: 80, length: 8 },
+      },
+    },
+    blob: f32blob([0, 1, 0, 0, 0, 1, 0, 0, 0, 0.5, 0.5, 1,      // float index = offset / 4
+                   0, 0, 0, 1, 1, 1, 0, 0, 0.25, 0.75]),
+  }));
+  const s = scene([{ label: "B", relative: "rel", cosine: "pts" }]);
+  assert.deepStrictEqual(Array.from(s.comparisons[0].relative.data), [0.25, 0.75]);
+  assert.strictEqual(s.comparisons[0].cosine, null);                 // not (L,)
+  assert.deepStrictEqual(MTJ.curveSeries(s, "distance").map((c) => [c.run, Array.from(c.values)]),
+                         [[1, [0.25, 0.75]]]);
+  assert.strictEqual(MTJ.curveSeries(s, "cosine"), null);
+  assert.strictEqual(scene([{ relative: "nope" }]).comparisons[0].relative, null);   // dangling
+  // a third run with no comparison (a different depth) has no pairing to draw
+  assert.strictEqual(MTJ.curveSeries(scene([{ relative: "rel" }], 3), "distance"), null);
+});
+
+test("a readout curve is the recorded probability, with the k-th as its ceiling elsewhere", () => {
+  const run = (finals) => ({ topk: finals.map((top) => [[["pad", 1]], top]) });
+  const a = run([[["x", 0.5], ["y", 0.3]], [["z", 0.6], ["x", 0.2]], [["x", 0.4], ["z", 0.35]]]);
+  const b = run([[["y", 0.7], ["x", 0.1]], [["y", 0.5], ["z", 0.4]], [["z", 0.9], ["w", 0.05]]]);
+  const c = MTJ.readoutCurve(a, "z");
+  assert.ok(Number.isNaN(c.p[0]) && c.ceiling[0] === 0.3);   // outside the top-2
+  assert.deepStrictEqual([c.p[1], c.p[2]], [0.6, 0.35]);
+  assert.ok(Number.isNaN(c.ceiling[1]) && Number.isNaN(c.ceiling[2]));
+  // final-layer tokens of every run, by the best probability any gives them
+  assert.deepStrictEqual(MTJ.readoutTokens([a, b]), ["z", "x", "w"]);
+  assert.strictEqual(MTJ.readoutCurve({ topk: null }, "z"), null);
+  const series = MTJ.curveSeries({ runs: [a, b], comparisons: [] }, "readout", "x");
+  assert.deepStrictEqual(series.map((s) => [s.run, Array.from(s.values)]),
+                         [[0, [0.5, 0.2, 0.4]], [1, [0.1, NaN, NaN]]]);
+});

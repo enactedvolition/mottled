@@ -249,3 +249,63 @@ def test_a_plain_cut_cannot_flag_a_short_prompt_and_the_chance_relative_one_can(
     assert r["shuffled_plain"].max() == 0.0
     assert r["shuffled"].min() > 0.7
     assert r["random"].mean() > r["pca"].mean() + 0.2
+
+
+# ---- gauge: what the projection is fitted on ----------------------------
+
+def _with_sink(seed=3, L=5, T=8, D=24):
+    """States one of which (position 0, every layer) is 200x the others'
+    size, as an attention sink is in a real residual stream."""
+    H = np.random.default_rng(seed).normal(size=(L, T, D)).astype(np.float32)
+    H[:, 0] *= 200.0
+    return H
+
+
+def test_gauge_none_hands_back_the_states_unchanged():
+    from projection import gauge
+    H = _with_sink()
+    (G,) = gauge([H], "none")
+    assert G is H or np.array_equal(G, H)
+    assert np.array_equal(project(G)[0], project(H)[0])
+
+
+def test_rms_gauge_puts_every_state_at_unit_rms_without_turning_it():
+    from projection import gauge
+    H = _with_sink()
+    (G,) = gauge([H], "rms")
+    assert G.dtype == H.dtype
+    np.testing.assert_allclose(np.sqrt((G.astype(np.float64) ** 2).mean(-1)), 1.0, rtol=1e-6)
+    cos = (G * H).sum(-1) / np.linalg.norm(G, axis=-1) / np.linalg.norm(H, axis=-1)
+    np.testing.assert_allclose(cos, 1.0, rtol=1e-6)
+    # a zero state has no direction to keep; it stays zero rather than NaN
+    H[2, 3] = 0.0
+    assert np.isfinite(gauge([H], "rms")[0]).all()
+
+
+def test_center_gauge_removes_each_layers_mean_over_every_run():
+    from projection import gauge
+    a, b = _with_sink(1, T=8), _with_sink(2, T=5)
+    ga, gb = gauge([a, b], "center")
+    union = np.concatenate([ga, gb], axis=1).astype(np.float64)
+    np.testing.assert_allclose(union.mean(axis=1), 0.0, atol=1e-3)
+    # the shift is one vector per layer, shared by the runs
+    np.testing.assert_allclose(a - ga, (b - gb)[:, :1].repeat(8, axis=1), atol=1e-3)
+    with pytest.raises(ValueError, match="same depth"):
+        gauge([a, _with_sink(2, L=4)], "center")
+
+
+def test_rms_center_is_rms_then_center():
+    from projection import gauge
+    a, b = _with_sink(1), _with_sink(2, T=3)
+    both = gauge([a, b], "rms+center")
+    staged = gauge(gauge([a, b], "rms"), "center")
+    for x, y in zip(both, staged):
+        np.testing.assert_allclose(x, y, atol=1e-6)
+
+
+def test_unknown_gauge_is_refused_and_config_lists_the_known_ones():
+    from config import GAUGE_CHOICES
+    from projection import GAUGES, gauge
+    assert GAUGE_CHOICES == list(GAUGES)
+    with pytest.raises(ValueError, match="unknown gauge"):
+        gauge([_with_sink()], "zscore")

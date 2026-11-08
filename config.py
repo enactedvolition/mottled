@@ -32,6 +32,7 @@ MODEL_CHOICES = [
 ]
 
 PROJECTION_CHOICES = ["pca", "umap"]
+GAUGE_CHOICES = ["none", "rms", "center", "rms+center"]   # projection.GAUGES
 DENSITY_CHOICES = ["kde", "knn"]
 TRAJECTORY_MODES = ["all_tokens", "token", "mean", "cls"]
 
@@ -64,6 +65,10 @@ class MarbleConfig:
 
     # projection
     projection: str = "pca"
+    # what the projection is fitted on (projection.gauge): "none" keeps the
+    # raw states, where an attention sink or the growth of norm with depth
+    # can decide the axes; "rms+center" takes both out
+    gauge: str = "none"
     n_components: int = 2
     seed: int = 0
 

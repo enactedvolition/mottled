@@ -406,7 +406,11 @@ def save_scene(result: dict, path_or_fh) -> None:
              "dtw_normalized": float(c.dtw.normalized),
              "shared_tokens": int(c.shared_tokens),
              "onset_layer": int(c.onset_layer),
-             "readout_changed": None if c.readout_changed is None else int(c.readout_changed)}
+             "readout_changed": None if c.readout_changed is None else int(c.readout_changed),
+             # per-layer hidden-space divergence at the compared token: the
+             # curves a viewer can draw with no projection in the way
+             "relative": w.add(f"comparison{i}.relative", c.relative.astype(np.float32)),
+             "cosine": w.add(f"comparison{i}.cosine", c.cosine.astype(np.float32))}
             for i, c in enumerate(result["comparisons"], start=1)
         ]
     _write(path_or_fh, manifest, w)
@@ -461,6 +465,10 @@ def load_scene(path_or_fh) -> dict:
                    for k in ("recon_error", "top_id", "top_act")
                    if run["features"].get(k) in arrays},
             }
+    if manifest.get("comparisons"):
+        scene["comparisons"] = [
+            {**c, **{k: arrays[c[k]] for k in ("relative", "cosine") if c.get(k) in arrays}}
+            for c in manifest["comparisons"]]
     if isinstance(scene.get("blast"), dict):
         b = scene["blast"]
         scene["blast"] = {

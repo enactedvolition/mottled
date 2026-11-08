@@ -125,6 +125,8 @@
       mottled: record.mottled || null,
       prompts: (record.prompts || []).length,
       projection: config.projection || null,
+      // a record without the field predates the gauge: the raw states
+      gauge: config.gauge || "none",
       density: config.density || null,
       seed: config.seed === undefined ? null : config.seed,
       // a record without the field predates the tuned lens: every scene

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Gauge and per-layer curves
+- **`MarbleConfig.gauge`** (`mottled project --gauge`, the explorer's Gauge
+  box) sets what the projection is fitted on: `none` (default, unchanged),
+  `rms` (each state at unit RMS), `center` (each layer's mean over every run
+  removed) or `rms+center`. On four arms of a Qwen2.5-1.5B prompt, the raw
+  PCA's 99.6% explained variance was one token: position 0, 3.6% of the
+  states, held 96.7% of the 2-D spread. With `rms+center` it holds 6.6%, PC1
+  no longer tracks depth, and within-layer fidelity rises from 0.31 to 0.42.
+  The 2-D plane then explains 13% of the gauged states' variance, which is
+  the honest size of what a 2-D map can show there. Fidelity is measured
+  against the gauged states, and the scene's provenance line names the gauge.
+  The SAE feature field is refused on a gauged scene: its plane inverts into
+  the gauged states, not the residual stream.
+- **Comparisons carry per-layer divergence curves**: `relative`
+  (`|h_b - h_a| / |h_a|`) and `cosine` at the compared token, in full hidden
+  space, as `(L,)` arrays in the scene (`docs/mtj-format.md`).
+- **The viewer has a curves panel** under the comparisons table: those two
+  curves, and a readout of any final-layer top-k token per layer at each
+  run's final token, read from the per-state top-k the scene already carries.
+  Where the token falls outside the top-k only the k-th probability is known,
+  and the panel draws that as a ceiling tick, never as a value. Older scenes
+  show the readout only; blast scenes show no panel.
+
 ### Jacobian lens and a registered follow-up
 - **`experiments/jacobian_lens.py`** fits the corpus-averaged Jacobian from
   each state to the last (Gurnee et al. 2026, with their reference

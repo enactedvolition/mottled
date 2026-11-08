@@ -356,8 +356,8 @@ def cmd_project(args, ctx: Ctx) -> int:
                  "record lists the first one's capture settings")
     if args.config:
         cfg = _config_file(cfg, args.config)
-    for flag, key in (("projection", "projection"), ("density", "density"),
-                      ("seed", "seed"), ("grid_size", "grid_size"),
+    for flag, key in (("projection", "projection"), ("gauge", "gauge"),
+                      ("density", "density"), ("seed", "seed"), ("grid_size", "grid_size"),
                       ("bootstrap", "density_bootstrap")):
         if getattr(args, flag) is not None:
             cfg = replace(cfg, **{key: getattr(args, flag)})
@@ -1024,6 +1024,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("inputs", nargs="*", metavar="FILE",
                    help="trajectory .mtj files or streams ('-' or none = stdin)")
     p.add_argument("--projection", choices=["pca", "umap"], default=None)
+    p.add_argument("--gauge", choices=["none", "rms", "center", "rms+center"], default=None,
+                   help="what the projection is fitted on: rms+center takes out "
+                        "attention sinks and depth (default: none, the raw states)")
     p.add_argument("--density", choices=["kde", "knn"], default=None)
     p.add_argument("--seed", type=int, default=None, help="projection/density seed")
     p.add_argument("--grid-size", type=int, default=None, metavar="N")

@@ -56,6 +56,14 @@ Run A is drawn solid; runs B, C, … get dash patterns and reduced opacity,
 with labels prefixed `B · token` etc. Comparison summaries (`hausdorff`,
 `dtw_normalized`, `shared_tokens`) appear under the runs list when present.
 
+Below them, the curves panel draws per-layer measurements no projection
+stands between: each run's `relative` distance and `cosine` to run A at the
+final token (from the comparisons, full hidden space), and the readout of a
+chosen token at each run's final position, read from the per-state `topk`.
+Outside the top-k only the k-th probability is recorded, so those layers get
+a ceiling tick rather than a point. A scene projected with a gauge (`mottled
+project --gauge rms+center`) names it in "Reading this scene".
+
 ## What the viewer expects from the format
 
 Everything is per `docs/mtj-format.md`, version 1:
