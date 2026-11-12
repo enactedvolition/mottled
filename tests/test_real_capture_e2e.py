@@ -420,27 +420,13 @@ GPT2_PROMPTS = ["The capital of France is", "The capital of Germany is"]
 
 
 def _load_hub(model_id, revision, dtype):
-    """`capture.load_model`, pinned to the recorded revision (it takes none):
-    the same Auto classes and dtype argument, eval mode, CPU."""
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    """`capture.load_model` pinned to the recorded revision, on CPU. It
+    refuses a commit other than the one asked for, so a scene that names a
+    revision the hub no longer serves fails here, not in the comparison."""
+    from capture import load_model
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, revision=revision, dtype=getattr(torch, dtype)).eval()
-    served = getattr(model.config, "_commit_hash", None)
-    if served is None:
-        # transformers >= 5.20 keeps no commit on the config; what it fetched
-        # for `revision` sits in the cache under the snapshot it resolved to
-        from pathlib import Path
-
-        from huggingface_hub import try_to_load_from_cache
-
-        hit = try_to_load_from_cache(model_id, "config.json", revision=revision)
-        if isinstance(hit, str):
-            served = Path(hit).parent.name
-    assert served == revision, f"asked the hub for {model_id}@{revision}, got {served}"
-    return model, tokenizer
+    assert revision is not None, model_id
+    return load_model(model_id, device="cpu", dtype=dtype, revision=revision)
 
 
 @pytest.mark.network

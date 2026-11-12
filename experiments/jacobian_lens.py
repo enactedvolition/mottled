@@ -37,7 +37,7 @@ from pathlib import Path
 
 import torch
 
-from capture import HookCapture
+from capture import HookCapture, load_model
 
 SKIP_FIRST = 16      # the reference implementation's default
 MAX_TOKENS = 128     # the paper's sequence length
@@ -157,7 +157,8 @@ def main(argv=None, loaded=None):
     log = lambda s: print(s, file=sys.stderr, flush=True)
 
     if loaded is None:
-        model, tok = ix.load_model(args.model, args.revision, args.device, args.dtype)
+        model, tok = load_model(args.model, device=args.device, dtype=args.dtype,
+                                revision=args.revision)
     else:
         model, tok = loaded
         model.to(args.device)

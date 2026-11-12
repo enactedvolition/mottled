@@ -63,8 +63,15 @@
   for the ref it loaded. A model loaded outside Mottled on ≥ 5.20 still
   records `null`: transformers keeps the commit nowhere, and naming the
   cache's current `main` instead could name weights the model does not
-  have. `experiments/patching.py` accepts a pinned full SHA the same way
-  `experiments/introspection.py` already did.
+  have.
+- **One answer to "which commit are these weights?"** That lookup had six
+  copies, and they disagreed about a local directory that shares a hub
+  repo's name: `experiments/introspection.py` recorded a pinned SHA for it,
+  though transformers loads the directory and ignores the pin. It is now
+  `provenance.hub_commit`, which never names a commit for a local
+  directory. `capture.load_model` takes `revision` and refuses a commit
+  other than the one asked for, so the experiments' pinned loads and the
+  explorer's go through the same function.
 
 ## 0.3.0 — 2026-10-27
 

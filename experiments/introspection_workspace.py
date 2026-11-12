@@ -31,6 +31,7 @@ import numpy as np
 import torch
 from scipy.optimize import nnls
 
+from capture import load_model
 from experiments import introspection as ix
 
 SCHEMA = "mottled-introspection-workspace/1"
@@ -203,7 +204,8 @@ def main(argv=None, loaded=None):
 
     letters, numbers = ix.LETTERS, ix.NUMBERS
     if loaded is None:
-        model, tok = ix.load_model(args.model, args.revision, args.device, args.dtype)
+        model, tok = load_model(args.model, device=args.device, dtype=args.dtype,
+                                revision=args.revision)
     else:
         model, tok, letters, numbers = loaded
         model.to(args.device)

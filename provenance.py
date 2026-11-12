@@ -114,6 +114,35 @@ def _model(meta: dict, cfg) -> dict:
     }
 
 
+def snapshot_commit(path) -> str | None:
+    """The hub commit a cached file belongs to: the hub cache names each
+    snapshot directory for the commit it resolved to. None outside the cache."""
+    parts = Path(path).parts
+    return parts[parts.index("snapshots") + 1] if "snapshots" in parts else None
+
+
+def hub_commit(name: str, revision: str | None = None) -> str | None:
+    """The commit the local hub cache holds for `name` at `revision` (the
+    default ref when None), without touching the network. None when it is not
+    cached, or when `name` is a local directory.
+
+    The one place that question is answered. transformers 5.20 stopped
+    recording the commit on the config, so every reader of it had grown its
+    own lookup, and they disagreed on the local-directory case: a checkpoint
+    saved as ./gpt2 is what transformers loads, and the cache would name the
+    hub's weights for it.
+    """
+    if Path(str(name)).expanduser().is_dir():
+        return None
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        hit = try_to_load_from_cache(str(name), "config.json", revision=revision)
+    except Exception:  # not installed, or not a repo id
+        return None
+    return snapshot_commit(hit) if isinstance(hit, str) else None
+
+
 def environment() -> dict:
     """Python, platform, and the versions that can move a number in a scene.
 

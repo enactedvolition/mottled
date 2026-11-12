@@ -86,17 +86,7 @@ def model_revision(name: str, model=None) -> str | None:
                 st = f.stat()
                 h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns};".encode())
         return "local:" + h.hexdigest()[:16]
-    try:
-        from huggingface_hub import try_to_load_from_cache
-
-        hit = try_to_load_from_cache(str(name), "config.json")
-    except Exception:  # not installed, or not a repo id
-        return None
-    if isinstance(hit, str):
-        parts = Path(hit).parts
-        if "snapshots" in parts:
-            return parts[parts.index("snapshots") + 1]
-    return None
+    return provenance_mod.hub_commit(name)
 
 
 # Pipeline: capture -> project -> compute_density -> mesh -> trajectory

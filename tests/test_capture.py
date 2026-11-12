@@ -176,9 +176,19 @@ def test_load_by_repo_id_records_the_commit_it_loaded(tmp_path, monkeypatch):
     model, _ = load_model("mottled-test/tiny")
     assert model.config._commit_hash == sha
 
-    # a local checkpoint under the same name is what loads; it is not that commit
+    # pinned: the commit asked for is the commit recorded, and a ref that only
+    # points at it today is refused rather than recorded under its name
+    model, _ = load_model("mottled-test/tiny", revision=sha)
+    assert model.config._commit_hash == sha
+    with pytest.raises(ValueError, match="resolved to commit " + sha):
+        load_model("mottled-test/tiny", revision="main")
+
+    # a local checkpoint under the same name is what loads; it is not that
+    # commit, and it ignores `revision`, so pinning it is refused too
     local = tmp_path / "cwd"
     synthetic.save_to(local / "mottled-test" / "tiny")
     monkeypatch.chdir(local)
     model, _ = load_model("mottled-test/tiny")
     assert getattr(model.config, "_commit_hash", None) is None
+    with pytest.raises(ValueError, match="resolved to commit None"):
+        load_model("mottled-test/tiny", revision=sha)
