@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-11-12
+
 ### Gauge and per-layer curves
 - **`MarbleConfig.gauge`** (`mottled project --gauge`, the explorer's Gauge
   box) sets what the projection is fitted on: `none` (default, unchanged),
@@ -72,8 +74,6 @@
   directory. `capture.load_model` takes `revision` and refuses a commit
   other than the one asked for, so the experiments' pinned loads and the
   explorer's go through the same function.
-
-## 0.3.0 — 2026-10-27
 
 ### A registered introspection experiment
 - **`experiments/introspection.py`** asks whether a model, after LoRA
