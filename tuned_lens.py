@@ -109,13 +109,13 @@ def from_hub(model_name: str, revision: str | None = None) -> TunedLens:
         raise ValueError(
             f"no published tuned lens for {model_name!r} in {HUB_REPO}; train one "
             "with the tuned-lens package and pass its directory as the lens") from None
+    import provenance
+
     lens = from_dir(Path(files[0]).parent)
-    # the snapshot directory is named for the commit it resolved to: the
-    # record names the lens that ran, not "whatever main was that day"
-    parts = Path(files[0]).parts
-    commit = parts[parts.index("snapshots") + 1] if "snapshots" in parts else None
+    # the record names the lens that ran, not "whatever main was that day"
     return TunedLens(weight=lens.weight, bias=lens.bias,
-                     source=f"{HUB_REPO}/lens/{model_name}", revision=commit,
+                     source=f"{HUB_REPO}/lens/{model_name}",
+                     revision=provenance.snapshot_commit(files[0]),
                      base_model_revision=lens.base_model_revision)
 
 

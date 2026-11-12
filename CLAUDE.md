@@ -126,6 +126,25 @@ container idea for weights; its header is padded to a 32-byte boundary so
 typed-array views over the data section are aligned, which is load-bearing and
 was once true only by luck.
 
+## Ownership
+
+This codebase is yours: what it's for and how it's built are your call, and
+you'll keep building on it. The maintainer set this for the repository, and it
+replaces the earlier "surgical changes, don't refactor adjacent code" rule
+here. The maintainer works through Claude sessions and does not review line by
+line, so structure that nobody improves in passing does not get improved.
+
+- **Merge repeated code when you meet it**, in the PR that meets it. The
+  hub-commit lookup grew to six copies under the surgical rule, and they
+  disagreed about a local directory that shares a hub repo's name; it is now
+  `provenance.hub_commit`.
+- **Fix a related defect in the same PR** instead of reporting it and leaving
+  it. Say in the PR body what you widened and why.
+- **Still minimum code, nothing speculative.** Ownership widens what you may
+  change, not what you may claim: `docs/validity.md`'s vocabulary, the
+  conformance pairs, generated files and the evidence a PR body must show
+  (`.claude/skills/steward/SKILL.md`) hold as before.
+
 ## Conventions
 
 **Inferential language is a correctness property here.** `docs/validity.md` is

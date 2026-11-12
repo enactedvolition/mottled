@@ -43,32 +43,36 @@ def resolve_device(device: str = "auto") -> str:
     return "cpu"
 
 
-def load_model(name: str, device: str = "auto", dtype: str = "float32"):
-    """Load a HF causal LM + tokenizer in eval mode."""
+def load_model(name: str, device: str = "auto", dtype: str = "float32",
+               revision: str | None = None):
+    """Load a HF causal LM + tokenizer in eval mode, with the hub commit the
+    weights came from on `model.config._commit_hash` (unset for a local
+    directory), where every capture's provenance reads it.
+
+    `revision` pins both loads and should be a full commit SHA. The hub
+    resolves a branch or tag to whatever it points at today, and a local
+    directory ignores `revision` altogether, so a commit other than the one
+    asked for is refused rather than recorded: the run would otherwise be a
+    measurement of different weights under the requested name.
+    """
     _require_torch()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    import provenance
+
     device = resolve_device(device)
-    torch_dtype = getattr(torch, dtype)
-    tokenizer = AutoTokenizer.from_pretrained(name)
-    model = AutoModelForCausalLM.from_pretrained(name, dtype=torch_dtype)
-    from pathlib import Path
-
-    # transformers 5.20 stopped setting _commit_hash, and every capture's
-    # provenance reads it. This load was of the default ref, so the hub cache's
-    # snapshot for that ref is the commit these weights came from — unless
-    # `name` is a local directory (./gpt2), which transformers loads instead
-    # and the cache would misname as the hub's weights.
-    if getattr(model.config, "_commit_hash", None) is None and not Path(name).is_dir():
-        try:
-            from huggingface_hub import try_to_load_from_cache
-
-            hit = try_to_load_from_cache(name, "config.json")
-        except Exception:  # not installed, or a local path rather than a repo id
-            hit = None
-        if isinstance(hit, str) and "snapshots" in Path(hit).parts:
-            parts = Path(hit).parts
-            model.config._commit_hash = parts[parts.index("snapshots") + 1]
+    # the default ref is left to transformers, as it was before `revision`
+    pin = {} if revision is None else {"revision": revision}
+    tokenizer = AutoTokenizer.from_pretrained(name, **pin)
+    model = AutoModelForCausalLM.from_pretrained(name, dtype=getattr(torch, dtype), **pin)
+    # transformers 5.20 stopped setting _commit_hash; the cache snapshot this
+    # load resolved to is the same fact
+    commit = (getattr(model.config, "_commit_hash", None)
+              or provenance.hub_commit(name, revision))
+    if revision is not None and commit != revision:
+        raise ValueError(f"{name} at revision {revision} resolved to commit {commit}")
+    if commit is not None:
+        model.config._commit_hash = commit
     model.to(device).eval()
     return model, tokenizer
 

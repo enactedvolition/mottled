@@ -248,3 +248,32 @@ def test_export_manifest_says_so_when_there_is_no_record(tmp_path, capsys):
 
     assert cli.main(["export-manifest", str(path)]) == 1
     assert "no analysis record" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- hub commit
+def test_hub_commit_reads_the_cache_and_never_names_a_local_directory(tmp_path, monkeypatch):
+    """One lookup for capture.load_model, pipeline.model_revision and the
+    experiments. The local-directory case is the one the separate copies got
+    wrong: ./gpt2 is what loads, and the cache would name the hub's weights."""
+    hub_constants = pytest.importorskip("huggingface_hub.constants")
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    repo = tmp_path / "models--mottled-test--tiny"
+    (repo / "snapshots" / sha).mkdir(parents=True)
+    (repo / "snapshots" / sha / "config.json").write_text("{}")
+    (repo / "refs").mkdir()
+    (repo / "refs" / "main").write_text(sha)
+    monkeypatch.setattr(hub_constants, "HF_HUB_CACHE", str(tmp_path))
+
+    assert P.hub_commit("mottled-test/tiny") == sha
+    assert P.hub_commit("mottled-test/tiny", "main") == sha
+    assert P.hub_commit("mottled-test/tiny", sha) == sha
+    assert P.hub_commit("mottled-test/tiny", "f" * 40) is None    # not cached
+    assert P.hub_commit("mottled-test/absent") is None
+    assert P.hub_commit("not a repo id") is None
+
+    (tmp_path / "cwd" / "mottled-test" / "tiny").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path / "cwd")
+    assert P.hub_commit("mottled-test/tiny") is None
+
+    assert P.snapshot_commit(repo / "snapshots" / sha / "config.json") == sha
+    assert P.snapshot_commit(tmp_path / "cwd" / "config.json") is None

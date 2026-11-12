@@ -32,7 +32,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from capture import HookCapture
+from capture import HookCapture, load_model
 
 SCHEMA = "mottled-introspection/1"
 SUMMARY_SCHEMA = "mottled-introspection-summary/1"
@@ -489,22 +489,6 @@ def summarize(records, concepts, docs, B=2000):
 # --------------------------------------------------------------------------
 # Run
 # --------------------------------------------------------------------------
-def load_model(name, revision, device, dtype):
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(name, revision=revision)
-    model = AutoModelForCausalLM.from_pretrained(name, revision=revision,
-                                                 dtype=getattr(torch, dtype))
-    resolved = getattr(model.config, "_commit_hash", None)
-    if resolved is None and revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
-        # transformers 5.20 no longer sets _commit_hash; a full commit SHA is
-        # immutable on the hub, so files fetched by it are that commit's
-        resolved = revision
-        model.config._commit_hash = revision
-    if revision is not None and resolved != revision:
-        raise ValueError(f"{name} at revision {revision} resolved to commit {resolved}")
-    return model.to(device).eval(), tok
-
-
 def _git_commit():
     try:
         return subprocess.run(["git", "rev-parse", "HEAD"], cwd=HERE, capture_output=True,
@@ -541,7 +525,8 @@ def main(argv=None, loaded=None):
 
     letters, numbers = LETTERS, NUMBERS
     if loaded is None:
-        model, tok = load_model(args.model, args.revision, args.device, args.dtype)
+        model, tok = load_model(args.model, device=args.device, dtype=args.dtype,
+                                revision=args.revision)
     else:
         model, tok, letters, numbers = loaded
         model.to(args.device)
