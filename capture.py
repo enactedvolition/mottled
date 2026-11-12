@@ -46,7 +46,7 @@ def resolve_device(device: str = "auto") -> str:
 def load_model(name: str, device: str = "auto", dtype: str = "float32",
                revision: str | None = None):
     """Load a HF causal LM + tokenizer in eval mode, with the hub commit the
-    weights came from on `model.config._commit_hash` (None for a local
+    weights came from on `model.config._commit_hash` (unset for a local
     directory), where every capture's provenance reads it.
 
     `revision` pins both loads and should be a full commit SHA. The hub
