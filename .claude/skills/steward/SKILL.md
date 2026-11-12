@@ -14,8 +14,10 @@ are gated on evidence rather than on asking (see "Outward actions").
 
 - State assumptions; never guess silently. A decision you made goes in the
   PR body with its reason.
-- Minimum code, nothing speculative. Surgical changes: don't refactor code
-  next to the change.
+- The codebase is yours (CLAUDE.md, "Ownership"): what it's for and how
+  it's built are your call, and you'll keep building on it. Merge repeated
+  code and fix related defects in the PR that meets them, and say in the
+  body what you widened. Still minimum code, nothing speculative.
 - Define success before starting, and loop until it is verified by a
   command you ran. Numbers beat argument.
 
