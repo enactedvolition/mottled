@@ -100,6 +100,13 @@
     };
   }
 
+  // tuned_lens.readout_name's names. config.lens alone cannot name the
+  // readout: a lens directory may hold a Jacobian lens or an R-lens, which
+  // are not KL-trained, so each run's recorded lens kind decides when there
+  // is one. An unknown kind reads as the raw lens, as in Python.
+  const LENS_NAMES = { logit: "logit lens", tuned: "tuned lens",
+                       jacobian: "Jacobian lens", relevance: "R-lens" };
+
   /** The provenance lines, from the analysis record the .mtj carries. */
   function provenanceSummary(scene) {
     const record = scene && scene.manifest && scene.manifest.analysis;
@@ -132,6 +139,10 @@
       // a record without the field predates the tuned lens: every scene
       // written before it read its layers through the raw logit lens
       lens: config.lens || "logit",
+      lensName: LENS_NAMES[(record.models || []).map((m) => m.lens && m.lens.kind)
+                             .find(Boolean)
+                           || (config.lens && config.lens !== "logit" ? "tuned" : "logit")]
+                || "logit lens",
       sae: record.sae ? { source: record.sae.source || null,
                           hook: record.sae.hook || null } : null,
     };
@@ -176,7 +187,7 @@
    * caveat attached where a reader meets it rather than in a panel. */
   function readoutLabel(scene) {
     const p = provenanceSummary(scene);
-    if (p && p.lens !== "logit") return "tuned lens";
+    if (p && p.lensName !== "logit lens") return p.lensName;
     return "logit lens — biased at early layers";
   }
 

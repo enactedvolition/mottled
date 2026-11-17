@@ -231,16 +231,19 @@ distinct:
 - **Ecosystem** — GPT-2 stays in the *SAE-dependent* samples because its
   dictionaries come with published Neuronpedia explanations. That is
   convenience, not the frontier of what is available, and an earlier draft of
-  this section overstated it: public SAEs exist for **Gemma-2 2B/9B** (Gemma
-  Scope, ungated), **Llama-3 8B** (EleutherAI, OpenMOSS), and **Qwen3
-  1.7B/8B** — the last published by Qwen for their own *ungated* models,
-  per-layer, which makes `Qwen3-1.7B-Base` + `Qwen/SAE-Res-Qwen3-1.7B-Base`
-  a fully-ungated modern feature path and the obvious next M2 target.
+  this section overstated it: public dictionaries exist for **Gemma 3
+  270M–27B** (Gemma Scope 2; the base weights are licence-gated), **Llama-3
+  8B** (EleutherAI, OpenMOSS), and **Qwen3 / Qwen3.5 up to 27B dense and
+  35B-A3B MoE**, published by Qwen for their own *ungated* models, per
+  layer. That makes `Qwen3-1.7B-Base` + `Qwen/SAE-Res-Qwen3-1.7B-Base` (or
+  the Qwen3.5 pair) a fully-ungated modern feature path and the obvious
+  next M2 target. Hub state as of 2026-11-16 is in `docs/field-notes.md`.
 
   The measured shape of the gap, since it is easy to overstate: **capture**
   scales freely (the residual decomposition is exact on Qwen2.5-1.5B);
-  **trained dictionaries** lag frontier by roughly two orders of magnitude
-  (~8-9B public vs ~1T frontier) and a generation or so in time;
+  **trained dictionaries** lag frontier by roughly 1.5 orders of magnitude
+  (27–70B public vs ~1T frontier, checked 2026-11-16) and a generation or
+  so in time;
   **explanations** lag furthest (Neuronpedia's GPT-2 labels were written by
   GPT-3.5); and **closed weights** are not a gap but a wall, which is what
   M4's degraded producer exists for.

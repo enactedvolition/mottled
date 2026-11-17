@@ -25,10 +25,21 @@ rule that the last layer needs no translator.
 A Jacobian-lens readout is a readout diagnostic (docs/validity.md), as the raw
 and tuned lens are: what a state is disposed, on average over this corpus, to
 make the model say. It is not what the model believes at that layer.
+
+`--backward lrp` fits the R-lens instead ("R-lens: making J-lens more
+faithful on early layers", LessWrong, 2026): the same estimator, with
+layer-wise relevance propagation rules in the backward pass, so what is
+averaged is a relevance coefficient rather than a raw gradient. `lrp_rules`
+says which rules and where. The post reports the advantage growing with
+model size and *none* on its smallest models, so a small-model R-lens is not
+expected to read better; that is for a registered run to measure, not for
+this file to claim. J++ (Ayonrinde & Lindsey, 2026) adds learned per-cluster
+weights on top of these rules; its weighting is not implemented here.
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import sys
@@ -41,6 +52,90 @@ from capture import HookCapture, load_model
 
 SKIP_FIRST = 16      # the reference implementation's default
 MAX_TOKENS = 128     # the paper's sequence length
+BACKWARDS = {"grad": "jacobian", "lrp": "relevance"}   # --backward -> lens_kind
+
+
+def _rule(value: torch.Tensor, grad_path: torch.Tensor) -> torch.Tensor:
+    """`value` forward, `grad_path`'s gradient backward. `grad_path` must be
+    exactly zero in value: it is built from (x - x.detach()) terms, so the sum
+    is `value` bit for bit and only the backward changes."""
+    return value.detach() + grad_path
+
+
+def _close(a: torch.Tensor, b: torch.Tensor) -> bool:
+    # Relative, and loose enough for bfloat16: what this guards is the layout
+    # (a norm with a (1 + w) scale, an MLP with no gate), which differs at
+    # O(1), not the last bits.
+    return bool((a.float() - b.float()).norm() <= 1e-2 * b.float().norm() + 1e-6)
+
+
+def _norm_hook(module, args, out):
+    """LN-rule: the RMS normalisation factor is a constant in the backward,
+    so the norm is linear and relevance does not collapse through it."""
+    x = args[0]
+    eps = getattr(module, "variance_epsilon", getattr(module, "eps", 0.0))
+    xf = x.float()
+    r = torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + eps)
+    # the Llama RMSNorm formula, checked against what the module returned:
+    # applying this rule to any other norm would change the forward silently
+    if getattr(module, "weight", None) is None or not _close(
+            module.weight * (xf * r).to(x.dtype), out):
+        raise ValueError(f"R-lens LN-rule is written for the Llama RMSNorm "
+                         f"(weight * x * rsqrt(mean(x^2) + eps)); "
+                         f"{type(module).__name__} does not compute that")
+    return _rule(out, module.weight * ((x - x.detach()).float() * r.detach()).to(x.dtype))
+
+
+def _mlp_hook(module, args, out):
+    """Identity rule on the gate activation, half rule on gate * up."""
+    x = args[0]
+    g, u = module.gate_proj(x), module.up_proj(x)
+    a = module.act_fn(g)
+    # identity rule: act(z) backpropagates as z * stop_grad(act(z) / z). At
+    # z = 0 the ratio is its limit, act'(0) = 0.5 for SiLU and both GELUs.
+    ratio = torch.where(g == 0, torch.full_like(g, 0.5), a / g).detach()
+    a = _rule(a, (g - g.detach()) * ratio)
+    # half rule: the bilinear product sends half its relevance down each
+    # path instead of all of it down both. The post says "evenly"; 0.5 is
+    # the AttnLRP uniform rule's reading of that (assumed, not quoted).
+    p = _rule(a * u, 0.5 * ((a - a.detach()) * u.detach() + a.detach() * (u - u.detach())))
+    new = module.down_proj(p)
+    if not _close(new, out):
+        raise ValueError(f"R-lens MLP rules are written for down(act(gate(x)) * up(x)); "
+                         f"{type(module).__name__} does not compute that")
+    return new
+
+
+@contextlib.contextmanager
+def lrp_rules(model):
+    """The R-lens backward, installed on every block for the duration.
+
+    Rules, from the post: the LN-rule on the residual-stream norms (each
+    block's own `*norm` children; the q/k norms inside attention are left
+    alone, as the post leaves them), and the identity and half rules on the
+    gated MLP. Linear layers and attention are unmodified: LRP's 0-rule on a
+    linear layer is the ordinary gradient. Forward values are unchanged; each
+    hook checks the module computes the formula its rule assumes and raises
+    if not, so an unsupported layout (GPT-2's LayerNorm, an MoE block) is
+    refused rather than read under the wrong rule.
+    """
+    from models.families import resolve_family
+
+    adapter = resolve_family(model)
+    handles = []
+    try:
+        for block in adapter.blocks:
+            mlp = adapter.block_submodules(block)[1]
+            if not all(hasattr(mlp, a) for a in ("gate_proj", "up_proj", "down_proj", "act_fn")):
+                raise ValueError(f"R-lens rules need a gated MLP (gate_proj, up_proj, "
+                                 f"down_proj, act_fn); this block has {type(mlp).__name__}")
+            handles.append(mlp.register_forward_hook(_mlp_hook))
+            handles += [m.register_forward_hook(_norm_hook)
+                        for name, m in block.named_children() if name.lower().endswith("norm")]
+        yield
+    finally:
+        for h in handles:
+            h.remove()
 
 
 def valid_positions(n_tokens: int, skip_first: int = SKIP_FIRST) -> torch.Tensor:
@@ -52,10 +147,10 @@ def valid_positions(n_tokens: int, skip_first: int = SKIP_FIRST) -> torch.Tensor
 
 
 def jacobians(model, input_ids: torch.Tensor, skip_first: int = SKIP_FIRST,
-              dim_batch: int = 8, layers=None) -> torch.Tensor:
+              dim_batch: int = 8, layers=None, backward: str = "grad") -> torch.Tensor:
     """J_l for each state index l in `layers` (default: every one below the
     last), from one sequence: (len(layers), D, D) float32 on CPU, row i =
-    output dimension i.
+    output dimension i. `backward="lrp"` computes it under `lrp_rules`.
 
     One forward of the sequence replicated `dim_batch` times, then one
     backward per `dim_batch` output dimensions against the retained graph:
@@ -84,7 +179,11 @@ def jacobians(model, input_ids: torch.Tensor, skip_first: int = SKIP_FIRST,
             return h
         return edit
 
-    with torch.enable_grad(), HookCapture(model, state_edits={l: keep(l) for l in [*layers, n]}):
+    if backward not in BACKWARDS:
+        raise ValueError(f"backward must be one of {sorted(BACKWARDS)}, got {backward!r}")
+    # the rules shape the graph the forward builds; the backward just walks it
+    rules = lrp_rules(model) if backward == "lrp" else contextlib.nullcontext()
+    with torch.enable_grad(), rules, HookCapture(model, state_edits={l: keep(l) for l in [*layers, n]}):
         model(input_ids=input_ids.to(device)[None].expand(dim_batch, -1), logits_to_keep=1)
     target, sources = live[n], [live[l] for l in layers]
     d = target.shape[-1]
@@ -103,18 +202,19 @@ def jacobians(model, input_ids: torch.Tensor, skip_first: int = SKIP_FIRST,
 
 
 def fit(model, sequences, skip_first: int = SKIP_FIRST, dim_batch: int = 8,
-        layers=None, log=lambda s: None) -> torch.Tensor:
+        layers=None, log=lambda s: None, backward: str = "grad") -> torch.Tensor:
     """The mean of `jacobians` over token-id sequences."""
     total = None
     for i, ids in enumerate(sequences):
         t0 = time.time()
-        j = jacobians(model, ids, skip_first, dim_batch, layers)
+        j = jacobians(model, ids, skip_first, dim_batch, layers, backward)
         total = j if total is None else total + j
         log(f"sequence {i + 1}/{len(sequences)}: {time.time() - t0:.0f}s")
     return total / len(sequences)
 
 
-def save(path, J: torch.Tensor, record: dict, layers=None, n_blocks=None) -> str:
+def save(path, J: torch.Tensor, record: dict, layers=None, n_blocks=None,
+         kind: str = "jacobian") -> str:
     """A tuned-lens directory (config.json + params.pt) holding J; returns
     the SHA-256 of params.pt, the bytes a later run should name.
 
@@ -134,7 +234,7 @@ def save(path, J: torch.Tensor, record: dict, layers=None, n_blocks=None) -> str
     partial = {} if layers == list(range(n_blocks)) else {"layers": layers}
     (path / "config.json").write_text(json.dumps(
         {**record, **partial, "num_hidden_layers": n_blocks, "d_model": d, "bias": False,
-         "lens_kind": "jacobian"}, indent=1))
+         "lens_kind": kind}, indent=1))
     return hashlib.sha256((path / "params.pt").read_bytes()).hexdigest()
 
 
@@ -151,6 +251,8 @@ def main(argv=None, loaded=None):
     ap.add_argument("--max-tokens", type=int, default=MAX_TOKENS)
     ap.add_argument("--layers", default=None,
                     help="comma-separated state indices to fit (default: all below the last)")
+    ap.add_argument("--backward", choices=sorted(BACKWARDS), default="grad",
+                    help="grad: the J-lens; lrp: the R-lens (see lrp_rules)")
     ap.add_argument("--docs", type=int, default=None, help="cap documents (tests)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
@@ -176,11 +278,12 @@ def main(argv=None, loaded=None):
     from models.families import resolve_family
     n_blocks = resolve_family(model).n_layers
     layers = None if args.layers is None else [int(x) for x in args.layers.split(",")]
-    J = fit(model, seqs, args.skip_first, args.dim_batch, layers, log)
+    J = fit(model, seqs, args.skip_first, args.dim_batch, layers, log, args.backward)
     record = {
         "base_model_name_or_path": args.model,
         "base_model_revision": getattr(model.config, "_commit_hash", None) or args.revision,
         "estimator": "sum over valid target positions, mean over valid source positions",
+        "backward": args.backward,
         "target": "last block output (pre final norm)",
         "corpus_sha256": ix.CORPUS_SHA256,
         "docs": [d["id"] for d in train_docs],
@@ -192,7 +295,7 @@ def main(argv=None, loaded=None):
         "torch": torch.__version__,
         "git_commit": ix._git_commit(),
     }
-    print(save(args.out, J, record, layers, n_blocks))
+    print(save(args.out, J, record, layers, n_blocks, BACKWARDS[args.backward]))
     return 0
 
 

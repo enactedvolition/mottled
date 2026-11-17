@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Caught up with the field (re-verified 2026-11-16)
+- **`docs/field-notes.md` re-verified** after three months. Every version
+  and Hub entry was checked again, and the file adds what appeared or was
+  missed since: TransformerLens 3.0's `TransformerBridge` and 4.0's removal
+  of `HookedTransformer` (Mottled's `tlens` extra stays pinned `<4`; moving
+  parity to the bridge is the open item), Gemma Scope 2, Qwen's Qwen3.5 SAEs,
+  Qwen3 transcoders for `circuit-tracer`, natural language autoencoders,
+  and the workspace-lens line (J-lens, R-lens, J++). **Correction:** the
+  2026-08-05 table missed Qwen3.5 SAEs and Gemma Scope 2, which both existed
+  then, so its "only fully-ungated modern feature path" claim was already
+  wrong. The dictionary gap is now about 1.5 orders of magnitude, not ~2.
+  `ROADMAP.md`'s copy of those claims is updated to match.
+- **`experiments/jacobian_lens.py --backward lrp`** fits the R-lens: the
+  J-lens estimator with LRP rules in the backward (LN-rule on residual
+  RMSNorms, identity rule on the gate activation, half rule on gate × up).
+  Forward values are bit-identical; each rule is pinned against its formula
+  and its test fails with the rule broken. Unsupported layouts are refused.
+  The lens records `lens_kind: "relevance"` and reads as "R-lens". **No
+  result is claimed:** the post reports no advantage on its smallest models,
+  and Mottled has not measured one.
+- **Fixed: the viewer called a Jacobian-lens scene a "tuned lens".** It named
+  the readout from the `config.lens` string, and a lens directory can hold a
+  Jacobian lens or an R-lens, neither of them KL-trained. It now uses the
+  runs' recorded `lens.kind`, as `tuned_lens.readout_name` does, and falls
+  back to `config.lens` only for older records. This was listed as a known
+  gap in `experiments/README.md` and is closed here.
+
 ## 0.3.0 — 2026-11-12
 
 ### Gauge and per-layer curves

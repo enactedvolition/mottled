@@ -15,6 +15,7 @@ import tiny
 import tuned_lens
 
 torch = pytest.importorskip("torch")
+transformers = pytest.importorskip("transformers")
 
 from capture import HookCapture, logit_lens  # noqa: E402
 from experiments import jacobian_lens as jl  # noqa: E402
@@ -130,3 +131,92 @@ def test_main_writes_a_lens_from_the_registered_train_documents(tmp_path, capsys
     assert capsys.readouterr().out.strip() == hashlib.sha256(
         (out / "params.pt").read_bytes()).hexdigest()
 
+
+
+# --- the R-lens backward (`backward="lrp"`) ---------------------------------
+
+def test_lrp_rules_leave_the_forward_bit_identical():
+    model, ids = _model(), _ids()
+    with torch.no_grad(), HookCapture(model) as plain:
+        want = model(input_ids=ids[None]).logits
+    with torch.no_grad(), jl.lrp_rules(model), HookCapture(model) as ruled:
+        got = model(input_ids=ids[None]).logits
+    assert torch.equal(got, want)
+    for layer in plain.states:
+        assert torch.equal(ruled.states[layer], plain.states[layer])
+
+
+def test_lrp_rules_come_off_with_the_context():
+    model, ids = _model(), _ids()
+    with jl.lrp_rules(model):
+        pass
+    assert all(not m._forward_hooks for m in model.modules())
+
+
+def test_norm_rule_backpropagates_through_a_frozen_rms_factor():
+    norm = _model().model.layers[0].input_layernorm
+    torch.manual_seed(1)
+    x, c = torch.randn(3, DIM, requires_grad=True), torch.randn(3, DIM)
+    h = norm.register_forward_hook(jl._norm_hook)
+    try:
+        (norm(x) * c).sum().backward()
+    finally:
+        h.remove()
+    r = torch.rsqrt(x.detach().pow(2).mean(-1, keepdim=True) + norm.variance_epsilon)
+    torch.testing.assert_close(x.grad, c * norm.weight.detach() * r)
+
+
+def test_mlp_rules_are_identity_on_the_gate_and_half_on_the_product():
+    mlp = _model().model.layers[0].mlp
+    torch.manual_seed(2)
+    x, c = torch.randn(3, DIM, requires_grad=True), torch.randn(3, DIM)
+    h = mlp.register_forward_hook(jl._mlp_hook)
+    try:
+        (mlp(x) * c).sum().backward()
+    finally:
+        h.remove()
+    with torch.no_grad():
+        g, u = mlp.gate_proj(x), mlp.up_proj(x)
+        a = mlp.act_fn(g)
+        dp = c @ mlp.down_proj.weight                       # d/d(product)
+        want = (0.5 * u * (a / g) * dp) @ mlp.gate_proj.weight \
+            + (0.5 * a * dp) @ mlp.up_proj.weight
+    torch.testing.assert_close(x.grad, want)
+
+
+def test_lrp_lens_is_the_estimator_run_on_the_ruled_graph():
+    """The registered estimator, unchanged, over the rules' graph — and the
+    rules move it, or the option would be a relabelled J-lens."""
+    model, ids = _model(), _ids()
+    R = jl.jacobians(model, ids, skip_first=SKIP, backward="lrp")
+    with jl.lrp_rules(model):
+        for layer in range(BLOCKS):
+            torch.testing.assert_close(R[layer], _brute_force(model, ids, layer, SKIP),
+                                       rtol=1e-4, atol=1e-5)
+    J = jl.jacobians(model, ids, skip_first=SKIP)
+    assert not torch.allclose(R[0], J[0], rtol=1e-3, atol=1e-4)
+
+
+def test_lrp_refuses_a_layout_its_rules_do_not_describe():
+    gpt2 = transformers.GPT2LMHeadModel(transformers.GPT2Config(
+        n_layer=1, n_embd=DIM, n_head=2, vocab_size=tiny.vocab_size(), n_positions=32)).eval()
+    with pytest.raises(ValueError, match="gated MLP"):
+        with jl.lrp_rules(gpt2):
+            pass
+    ln = torch.nn.LayerNorm(DIM)            # centres and adds a bias: not RMSNorm
+    x = torch.randn(2, DIM)
+    with pytest.raises(ValueError, match="RMSNorm"):
+        jl._norm_hook(ln, (x,), ln(x))
+    with pytest.raises(ValueError, match="backward must be"):
+        jl.jacobians(_model(), _ids(), skip_first=SKIP, backward="lrp+")
+
+
+def test_main_writes_an_r_lens_that_names_itself(tmp_path):
+    out = tmp_path / "rlens"
+    assert jl.main(["--out", str(out), "--docs", "2", "--max-tokens", "12",
+                    "--skip-first", str(SKIP), "--backward", "lrp"],
+                   loaded=(_model(), tiny.tokenizer())) == 0
+    config = json.loads((out / "config.json").read_text())
+    assert config["lens_kind"] == "relevance" and config["backward"] == "lrp"
+    lens = tuned_lens.from_dir(out)
+    assert tuned_lens.readout_name({"lens": lens.record()}) == "R-lens"

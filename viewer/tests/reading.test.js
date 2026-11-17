@@ -170,9 +170,17 @@ test("the inspector names the readout, and cautions the raw lens", () => {
   assert.match(R.readoutLabel(scene({ analysis: RECORD })), /^logit lens .*early layers/);
   // no record at all: every producer that writes none reads through the raw lens
   assert.match(R.readoutLabel(scene()), /^logit lens .*early layers/);
-  // a lens directory is a tuned lens too
+  // a lens directory with no recorded kind predates the Jacobian lens: tuned
   const dir = { ...RECORD, config: { ...RECORD.config, lens: "/lenses/qwen" } };
   assert.strictEqual(R.readoutLabel(scene({ analysis: dir })), "tuned lens");
+  // a recorded kind names it: a Jacobian or R-lens directory is not "tuned"
+  for (const [kind, name] of [["jacobian", "Jacobian lens"], ["relevance", "R-lens"]]) {
+    const rec = { ...dir, models: [{ ...RECORD.models[0], lens: { kind } }] };
+    assert.strictEqual(R.readoutLabel(scene({ analysis: rec })), name);
+    assert.strictEqual(R.sceneSummary(scene({ analysis: rec })).provenance.lensName, name);
+  }
+  const raw = { ...RECORD, models: [{ ...RECORD.models[0], lens: { kind: "logit" } }] };
+  assert.match(R.readoutLabel(scene({ analysis: raw })), /^logit lens .*early layers/);
 });
 
 test("the notes keep docs/validity.md's vocabulary", () => {
