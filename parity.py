@@ -19,12 +19,15 @@ Two comparisons carry the claim, and they are different claims:
   reproduce what the model itself predicts, every shallower readout in the
   explorer is measuring something other than what it claims to.
 
-A third, `transformer_lens`, is comparable only against
-``from_pretrained_no_processing``: TransformerLens by default folds layer-norms
-and centers writing weights, which changes the residual stream on purpose. A
-"disagreement" against a processed model would be a real difference reported as
-an error, so this harness refuses to make that comparison rather than publish a
-number that means nothing.
+A third, `transformer_lens`, is comparable only against an unprocessed
+model: TransformerLens's weight processing (folding layer-norms, centering
+writing weights) changes the residual stream on purpose. A "disagreement"
+against a processed model would be a real difference reported as an error, so
+this harness uses ``TransformerBridge.boot_transformers`` with its defaults,
+which do no weight processing, and never calls ``enable_compatibility_mode``,
+which does. The bridge is close to HF's numerics, not bit-identical (1e-6
+to 1e-5 relative on the default models, varying by machine), so this row's
+deviations are small but not zero, unlike the `transformers` row.
 
 Nothing here runs in CI — the matrix downloads real weights. It is a command a
 reader runs, and `tests/test_parity.py` pins the machinery offline.
@@ -163,16 +166,17 @@ def against_transformers(model, tokenizer, prompt: str = DEFAULT_PROMPT,
 def against_transformer_lens(name: str, prompt: str = DEFAULT_PROMPT) -> Comparison:
     """Mottled's capture against a TransformerLens run of the same weights.
 
-    Uses ``from_pretrained_no_processing``: TL's default folds layer-norms and
-    centers writing weights, which moves the residual stream deliberately. The
-    comparison is only meaningful on the unprocessed model — see the module
-    docstring.
+    Uses TransformerLens 4's ``TransformerBridge``: 4.0 removed
+    ``HookedTransformer`` and its ``from_pretrained_no_processing``. The
+    bridge's default does no weight processing, which is the only model the
+    comparison means anything on — see the module docstring.
     """
     out = Comparison(model=name, reference="transformer_lens")
     try:
-        import transformer_lens as tl
+        from transformer_lens.model_bridge import TransformerBridge
     except ImportError:
-        out.status, out.detail = "skipped", "transformer-lens is not installed"
+        # absent, or older than the bridge: neither can run the cell
+        out.status, out.detail = "skipped", "transformer-lens >= 4 is not installed"
         return out
 
     import torch
@@ -182,8 +186,8 @@ def against_transformer_lens(name: str, prompt: str = DEFAULT_PROMPT) -> Compari
 
     # No BOS: TL prepends one for GPT-2 by default, HF does not, and parity
     # needs both sides to run the same tokens.
-    ht = tl.HookedTransformer.from_pretrained_no_processing(
-        name, default_prepend_bos=False)
+    ht = TransformerBridge.boot_transformers(name)
+    ht.cfg.default_prepend_bos = False
     model, tokenizer = load_model(name)
     with torch.no_grad():
         theirs = from_hooked_transformer(ht, prompt)

@@ -39,16 +39,20 @@ explanation is weakest.**
 | `transformers` | 5.23.0 (2026-11-13) | The substrate everything else wraps |
 
 **TransformerLens changed shape.** 3.0 (2026-04-17) introduced
-`TransformerBridge`, which keeps HF's own implementation behind an
-architecture adapter instead of reimplementing each model, and whose default
-numerics are HF's (no folding, no centring). 4.0 removed `HookedTransformer`:
-in the 4.4.0 wheel, `from transformer_lens import HookedTransformer` raises
-a message pointing at `TransformerBridge.boot_transformers`. Mottled's
-`tlens` extra is pinned `<4` and `parity.py` / `models/hooked.py` still go
-through `HookedTransformer`, so the TransformerLens parity cell checks a
-library line that no longer gets releases. That is the most concrete place
-this repo trails the ecosystem. Moving the cell to `TransformerBridge` needs
-a network run to verify, and has not been done.
+`TransformerBridge`, which wraps the HF model behind an architecture
+adapter instead of converting it into TL's own classes, and whose default
+does no weight processing (no folding, no centring). 4.0 removed
+`HookedTransformer`: in the 4.4.0 wheel, `from transformer_lens import
+HookedTransformer` raises a message pointing at
+`TransformerBridge.boot_transformers`. The bridge is close to HF's numerics
+but not bit-identical, and how close depends on the machine. Measured
+2026-11-18 on 4.4.0, worst relative state deviation from Mottled's capture
+across GPT-2, Qwen2.5-0.5B and Pythia-160m: 1.3e-5 in a cloud session (CPU,
+Python 3.13) and 3.3e-6 on the CI runner (Python 3.11, #77's evidence run).
+GPT-2's absolute deviation was 6.1e-5 in the session and 2.4e-4 on the
+runner. Mottled's own capture agrees with HF exactly on both. Mottled's `tlens` extra requires `>=4`, and
+the parity cell and `models/hooked.py` run on the bridge (until 2026-11-18
+they were pinned `<4` on `HookedTransformer`).
 
 Mottled deliberately depends on **none** of these at runtime. It reads the
 residual stream through plain HF forward hooks and treats TL/SAELens as

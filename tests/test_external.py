@@ -156,10 +156,10 @@ def test_residual_stack_follows_mottleds_layer_convention():
 
 @pytest.mark.network
 def test_from_cache_matches_from_hooked_transformer():
-    tl = pytest.importorskip("transformer_lens")
+    bridge = pytest.importorskip("transformer_lens.model_bridge")
     from models.hooked import from_cache, from_hooked_transformer
 
-    model = tl.HookedTransformer.from_pretrained("gpt2")
+    model = bridge.TransformerBridge.boot_transformers("gpt2")
     prompt = "The capital of France is"
     _, cache = model.run_with_cache(model.to_tokens(prompt))
 

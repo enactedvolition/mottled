@@ -41,7 +41,7 @@ jobs:
         # pinned because without it test_hooked and test_external skip.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock "transformer-lens==3.9.0" \
+          pip install -r requirements.lock "transformer-lens==4.4.0" \
               --extra-index-url https://download.pytorch.org/whl/cpu
           git rev-parse HEAD 'HEAD^{tree}'
           python --version; node --version
@@ -73,7 +73,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -c requirements.lock ".[models,tlens,nnsight]" \
-              "transformer-lens==3.9.0" "nnsight==0.8.0" \
+              "transformer-lens==4.4.0" "nnsight==0.8.0" \
               --extra-index-url https://download.pytorch.org/whl/cpu
           git rev-parse HEAD 'HEAD^{tree}'
           python --version

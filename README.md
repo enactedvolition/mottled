@@ -201,7 +201,7 @@ patching at scale) use a dedicated tool:
 [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens),
 [circuit-tracer](https://pypi.org/project/circuit-tracer/), ACDC, EAP.
 Mottled is the map you read *before* and *alongside* those, and it
-interoperates both ways: a `HookedTransformer`, an `ActivationCache` you
+interoperates both ways: a TransformerLens model, an `ActivationCache` you
 already ran, or states from NNsight or your own hooks all become a
 `StateTrajectory`, and a SAELens dictionary loads directly.
 
@@ -403,8 +403,8 @@ This runs one prompt through Mottled and through implementations a reviewer
 already trusts, and reports the largest disagreement as a number: the
 per-block states against HuggingFace's own `output_hidden_states`, the
 deepest logit lens against the model's actual logits, NNsight, and
-TransformerLens (only against `from_pretrained_no_processing`, since TL's
-default processing moves the residual stream on purpose). It exits non-zero
+TransformerLens (only against an unprocessed `TransformerBridge`, since
+TL's weight processing moves the residual stream on purpose). It exits non-zero
 when anything exceeds tolerance, and a skipped row is never counted as a
 passed one.
 
