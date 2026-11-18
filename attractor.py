@@ -24,7 +24,7 @@ internals, any backend.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
@@ -73,6 +73,15 @@ def density_at(landscape: Landscape, points_xy: np.ndarray) -> np.ndarray:
     return interp(np.column_stack([pts[:, 1], pts[:, 0]]))
 
 
+def members_of(coords: np.ndarray, landscape: Landscape,
+               member_threshold: float = 0.5) -> np.ndarray:
+    """(M, 2) int (layer, token) states whose interpolated density reaches
+    `member_threshold` of the field's peak. coords: (L, T, 2+)."""
+    pts = np.asarray(coords, dtype=np.float64)[..., :2]
+    dens = density_at(landscape, pts.reshape(-1, 2)).reshape(pts.shape[:2])
+    return np.argwhere(dens >= member_threshold * max(dens.max(), 1e-12)).astype(np.int64)
+
+
 def analyze(
     traj: StateTrajectory,
     coords: np.ndarray,
@@ -92,10 +101,8 @@ def analyze(
     """
     token = int(token) % traj.n_tokens
     L, T = traj.n_layers, traj.n_tokens
-    pts = np.asarray(coords, dtype=np.float64)[..., :2]
 
-    dens = density_at(landscape, pts.reshape(-1, 2)).reshape(L, T)
-    members = np.argwhere(dens >= member_threshold * max(dens.max(), 1e-12))
+    members = members_of(coords, landscape, member_threshold)
     layers = members[:, 0]
     layer_range = (int(layers.min()), int(layers.max())) if len(layers) else None
     late_share = float((layers >= L / 2).mean()) if len(layers) else 0.0
@@ -136,7 +143,7 @@ def analyze(
         token=token,
         n_states=L * T,
         center=center,
-        members=members.astype(np.int64),
+        members=members,
         member_share=float(len(members)) / (L * T),
         member_threshold=float(member_threshold),
         layer_range=layer_range,
@@ -288,3 +295,257 @@ def explain(report: BasinReport, traj: StateTrajectory, quality=None) -> str:
         "visible.*"
     )
     return "\n\n".join(parts)
+
+
+# --------------------------------------------------------------------------
+# The basin null
+# --------------------------------------------------------------------------
+# The criterion, fixed here before any run is looked at (docs/validity.md asks
+# for one declared in advance). Every result reports both.
+NULL_DRAWS = 200
+NULL_ALPHA = 0.05
+# A token whose median state norm is this many times every token's median
+# makes the step-direction null unfair: its directions, handed to ordinary
+# tokens, scatter them, and the relabelled reference sets inherit its
+# distance, so any basin of the rest looks concentrated. On five GPT-2 small
+# prompts every raw-space basin "survived" because of position 0; with it
+# dropped, or each state scaled to unit RMS, none did. Measured, raw /
+# `center` gauge: GPT-2 position 0 at 33-35x / 4.0-9.9x, distilgpt2 23-25x,
+# pythia-70m 4.0-4.8x; with position 0 removed, no token in any of them
+# above 1.40x (synthetic walks 1.09-1.24x). The cut sits between.
+SCALE_OUTLIER = 2.0
+# A basin holding more than this share of the run's states is the typical
+# state, not a concentration of states, and there is nothing to test. The
+# explorer's half-peak basin is usually this broad: 81-87% of states on five
+# GPT-2 small prompts with raw states, 57-85% with the sink gauged out. A
+# smooth density over the whole cloud plateaus, and even 30 states pulled
+# 99% of the way together did not shrink it below 71%.
+MAX_REGION_SHARE = 0.5
+
+
+@dataclass
+class Concentration:
+    """Whether a basin's members from different tokens sit closer together
+    than the same pattern of states on other tokens (see `concentration`)."""
+
+    status: str               # "tested" | "one-token" | "depth-band" | "no-members"
+                              # | "scale-outlier" | "not-a-region" (basin_null only)
+    n_member_tokens: int      # distinct token positions among the members
+    distance: float | None    # mean distance between members of different tokens
+    ratio: float | None       # distance / its mean over relabelled sets; < 1 is closer
+    draws: int
+    outlier_token: int | None = None    # the token that made it "scale-outlier"
+    outlier_scale: float | None = None  # its median state norm / every token's median
+    n_members: int = 0                  # basin size, in states
+    n_states: int = 0                   # L * T
+
+
+@dataclass
+class BasinNull:
+    """One run's basin against the step-direction null (see `basin_null`)."""
+
+    observed: Concentration
+    surrogate_ratios: np.ndarray | None  # (draws,); nan where a surrogate is not comparable
+    p_surrogate: float | None            # share of comparable surrogates at least as concentrated
+    verdict: str        # "survives" | "within-null" | "underpowered", or observed.status
+    draws: int
+    alpha: float
+    seed: int
+
+
+def concentration(space: np.ndarray, members: np.ndarray, draws: int = NULL_DRAWS,
+                  rng: np.random.Generator | None = None) -> Concentration:
+    """A statistic that can come back empty, which `members_of` cannot: every
+    density field has a peak, so every run has states above half of it.
+
+    space: (L, T, D) states in the space the projection was fitted on.
+    Within one token, consecutive layers are close whenever its steps are
+    small. That is deceleration, which `BasinReport.step` already measures,
+    so only pairs of members from *different* tokens count here. The
+    reference is the members' own (layer, token) pattern moved onto other
+    tokens by a random relabelling of positions: the same layers and the
+    same shape of set, so depth alone cannot produce a low ratio.
+
+    The ratio is a statistic, not a test: the members were chosen for being
+    dense, so they beat relabelled sets far more often than chance would
+    (38% of runs at p <= 0.05 on synthetic walks with no basin planted).
+    `basin_null` supplies the null, by putting surrogates through the same
+    selection.
+
+    Three cases cannot be tested and are reported as such: one token (there
+    are no pairs), every token at the same layers (a band of depth: every
+    relabelling returns the same set), and a token on another scale from the
+    rest (`SCALE_OUTLIER`; scaling each state to unit RMS, the `rms` gauge,
+    removes it).
+    """
+    from scipy.spatial.distance import cdist
+
+    space = np.asarray(space, dtype=np.float64)
+    T = space.shape[1]
+    members = np.asarray(members, dtype=np.int64).reshape(-1, 2)
+    layers_of = {t: frozenset(members[members[:, 1] == t, 0].tolist())
+                 for t in np.unique(members[:, 1]).tolist()}
+
+    def untestable(status, **outlier):
+        return Concentration(status, len(layers_of), None, None, draws, **outlier,
+                             n_members=len(members), n_states=space.shape[0] * T)
+
+    scale = np.median(np.linalg.norm(space, axis=-1), axis=0)          # (T,)
+    worst = int(np.argmax(scale))
+    if scale[worst] >= SCALE_OUTLIER * max(float(np.median(scale)), 1e-12):
+        return untestable("scale-outlier", outlier_token=worst,
+                          outlier_scale=float(scale[worst] / np.median(scale)))
+    if not layers_of:
+        return untestable("no-members")
+    if len(layers_of) < 2:
+        return untestable("one-token")
+    if len(layers_of) == T and len(set(layers_of.values())) == 1:
+        return untestable("depth-band")
+
+    flat = space.reshape(-1, space.shape[-1])
+    dist = cdist(flat, flat)
+
+    def cross_token(tokens):
+        idx = members[:, 0] * T + tokens
+        return float(dist[np.ix_(idx, idx)][tokens[:, None] != tokens[None, :]].mean())
+
+    rng = np.random.default_rng(0) if rng is None else rng
+    observed = cross_token(members[:, 1])
+    relabelled = np.array([cross_token(rng.permutation(T)[members[:, 1]])
+                           for _ in range(draws)])
+    return Concentration(
+        status="tested",
+        n_member_tokens=len(layers_of),
+        distance=observed,
+        ratio=observed / max(float(relabelled.mean()), 1e-12),
+        draws=draws,
+        n_members=len(members),
+        n_states=space.shape[0] * T,
+    )
+
+
+def step_direction_surrogate(hidden: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """A run with the same starts and the same step sizes, going other ways.
+
+    Each token keeps its layer-0 state and the size of every step it took;
+    the direction of each step is another token's at the same layer. What
+    survives is everything step sizes and a layer's shared directions
+    produce: late layers piling up because steps shrink, a position-0 state
+    thrown far from the rest, a drift every token shares. What is destroyed
+    is which token moved which way.
+
+    Directions are permuted, not drawn at random: an isotropic walk in a
+    768-dimensional space is unlike any residual stream, so beating it would
+    show only that the model is not noise.
+    """
+    hidden = np.asarray(hidden)
+    steps = np.diff(hidden.astype(np.float64), axis=0)            # (L-1, T, D)
+    norms = np.linalg.norm(steps, axis=-1, keepdims=True)
+    units = steps / np.maximum(norms, 1e-12)
+    donors = np.stack([rng.permutation(hidden.shape[1]) for _ in range(len(steps))])
+    moved = np.take_along_axis(units, donors[:, :, None], axis=1) * norms
+    return np.concatenate([hidden[:1], hidden[:1] + np.cumsum(moved, axis=0)]) \
+        .astype(hidden.dtype)
+
+
+def basin_null(space: np.ndarray, basin_of, draws: int = NULL_DRAWS,
+               alpha: float = NULL_ALPHA, seed: int = 0) -> BasinNull:
+    """Is this run's basin more than slowing steps and shared drift?
+
+    space: (L, T, D) states the projection is fitted on (the run's gauged
+    residual stream). `basin_of(space)` returns the basin's members under
+    the run's own projection, density estimator and cut. The run and every
+    surrogate go through it, so the projection is refitted each time and no
+    surrogate is drawn on the real run's axes. Surrogates are built in this
+    space, not the raw stream, so step sizes are those of the picture.
+
+    A basin holding more than `MAX_REGION_SHARE` of the states is not
+    tested ("not-a-region"). The surrogates are held to the same condition:
+    only those whose own basin is a testable region are compared. Comparing
+    a run selected for being localized with surrogates that mostly are not
+    biased p low (median 0.22 on synthetic walks with no basin planted).
+    With fewer than `1 / alpha - 1` comparable surrogates p cannot reach
+    `alpha`, and the verdict is "underpowered".
+
+    The basin survives when its cross-token concentration (`concentration`)
+    is greater than in all but `alpha` of the comparable surrogates
+    (`step_direction_surrogate`).
+
+    Surviving shows a concentration these tokens reach in this run that step
+    sizes do not explain. It does not show the model uses it: that takes an
+    intervention.
+    """
+    rng = np.random.default_rng(seed)
+    observed = concentration(space, basin_of(space), draws=draws, rng=rng)
+    if observed.status == "tested" and \
+            observed.n_members > MAX_REGION_SHARE * observed.n_states:
+        observed = replace(observed, status="not-a-region", distance=None, ratio=None)
+    if observed.status != "tested":
+        return BasinNull(observed, None, None, observed.status, draws, alpha, seed)
+
+    ratios = np.full(draws, np.nan)
+    for i in range(draws):
+        surrogate = step_direction_surrogate(space, rng)
+        c = concentration(surrogate, basin_of(surrogate), draws=draws, rng=rng)
+        if c.status == "tested" and c.n_members <= MAX_REGION_SHARE * c.n_states:
+            ratios[i] = c.ratio
+    comparable = ratios[np.isfinite(ratios)]
+    if len(comparable) < 1 / alpha - 1:
+        return BasinNull(observed, ratios, None, "underpowered", draws, alpha, seed)
+    p = float((1 + (comparable <= observed.ratio).sum()) / (len(comparable) + 1))
+    return BasinNull(observed, ratios, p, "survives" if p <= alpha else "within-null",
+                     draws, alpha, seed)
+
+
+def explain_null(null: BasinNull) -> str:
+    """One `basin_null` result → markdown prose, in docs/validity.md's terms."""
+    head = "**Is it more than slowing down?** — "
+    obs = null.observed
+    if obs.status == "no-members":
+        return head + "there is no basin to test."
+    if obs.status == "one-token":
+        return head + ("every member of this basin belongs to one token position. "
+                       "It is one trajectory whose steps have become small, which "
+                       "the step curve already measures; there is no concentration "
+                       "across tokens to test.")
+    if obs.status == "depth-band":
+        return head + ("the basin holds every token at the same layers. It is a "
+                       "band of depth, not a region some tokens reach and others "
+                       "do not, so there is nothing token-specific to test.")
+    if obs.status == "not-a-region":
+        return head + (
+            f"not tested: the basin holds **{obs.n_members} of {obs.n_states}** "
+            f"states ({obs.n_members / obs.n_states:.0%}). That is most of the "
+            f"picture, the plateau of a smooth density, not a region some states "
+            f"reach and others do not, so there is no concentration to test.")
+    if obs.status == "scale-outlier":
+        return head + (
+            f"not tested: token {obs.outlier_token}'s states are "
+            f"**{obs.outlier_scale:.0f}×** the norm of the rest (an attention sink "
+            f"looks like this). The picture is mostly the other tokens seen from "
+            f"far away, and swapping step directions with it would make any run "
+            f"look concentrated. Set the gauge to `rms` or `rms+center` and test "
+            f"again.")
+    comparable = null.surrogate_ratios[np.isfinite(null.surrogate_ratios)]
+    lead = (
+        f"members from different tokens sit at **{obs.ratio:.2f}×** the hidden-space "
+        f"distance of the same pattern of states on other tokens. Of {null.draws} "
+        f"surrogate runs that keep every token's starting state and step sizes but "
+        f"give each step another token's direction, {len(comparable)} had a basin "
+        f"that is a region at all"
+    )
+    if null.verdict == "underpowered":
+        return head + lead + (
+            f", too few for a p-value that could reach α = {null.alpha:g}: "
+            f"untested, not refuted.")
+    lead += (f", and **{int((comparable <= obs.ratio).sum())}** of those were at "
+             f"least as concentrated (p = {null.p_surrogate:.3f}). ")
+    if null.verdict == "survives":
+        return head + lead + (
+            f"At α = {null.alpha:g} the concentration is not reproduced by step "
+            f"sizes and shared directions: it is a state concentration region "
+            f"these tokens reach in this run. That is geometry, not mechanism — "
+            f"whether the model uses it takes an intervention.")
+    return head + lead + (
+        f"At α = {null.alpha:g} that is within what slowing steps and shared "
+        f"drift produce: this basin is not evidence of anything more.")

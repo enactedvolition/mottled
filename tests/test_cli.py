@@ -144,6 +144,26 @@ def test_project_takes_policy_from_flags_config_and_set(tmp_path, model_dir):
     assert statefile.load_scene(out)["terrain"]["z"].shape == (24, 24)
 
 
+def test_basin_prints_the_null_under_the_capture_settings(tmp_path, capsys, model_dir):
+    traj = tmp_path / "t.mtj"
+    cli.main(["capture", *PROMPTS, "--model", model_dir, "-o", str(traj)])
+    capsys.readouterr()
+    assert cli.main(["basin", str(traj), "--draws", "5", "--gauge", "rms"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert [r["prompt"] for r in out] == PROMPTS
+    for r in out:
+        assert r["draws"] == 5 and r["gauge"] == "rms" and r["alpha"] == 0.05
+        assert r["verdict"] in ("survives", "within-null", "one-token",
+                                "depth-band", "no-members")
+        if r["observed"]["status"] == "tested":
+            assert len(r["surrogate_ratios"]) == 5
+        else:   # an untestable basin says why instead of a verdict
+            assert r["verdict"] == r["observed"]["status"]
+            assert r["surrogate_ratios"] is None and r["p_surrogate"] is None
+        assert r["explanation"].startswith("**Is it more than slowing down?**")
+    assert cli.main(["basin", str(traj), "--draws", "0"]) == 1
+
+
 # ----------------------------------------------------- inspect / validate
 def test_inspect_json_and_ndjson(tmp_path, capsys, model_dir):
     scene = tmp_path / "s.mtj"

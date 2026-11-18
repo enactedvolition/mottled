@@ -46,6 +46,7 @@ from pipeline import (  # noqa: F401
     attach_features,
     attach_inspector,
     attach_manifest,
+    basin_null,
     chat_input,
     chat_reply,
     degraded_note,
@@ -757,6 +758,15 @@ def main() -> None:
             if report.entropy is not None:
                 st.markdown("**Predictive entropy per layer** *(nats)*")
                 st.line_chart({"entropy": report.entropy})
+            # on demand: every surrogate is projected afresh, seconds for PCA
+            # and minutes for UMAP, too slow to rerun on every widget change
+            if st.button(f"Test against {attractor_mod.NULL_DRAWS} surrogate runs",
+                         key="basin_null",
+                         help="Is this basin more than slowing steps and shared "
+                              "drift? Tests this run on its own projection, not "
+                              "a scene's joint one."):
+                with st.spinner("Projecting surrogate runs…"):
+                    st.markdown(attractor_mod.explain_null(basin_null(cfg, traj)))
 
         with st.expander("Research metrics", expanded=False):
             summary = metrics_mod.summarize(traj, result["coords"], token=token)
