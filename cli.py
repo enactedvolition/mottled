@@ -336,18 +336,12 @@ def struct_error():
     return struct.error
 
 
-def cmd_project(args, ctx: Ctx) -> int:
-    inputs = _read_inputs(args.inputs, "a trajectory .mtj")
-    sink = Sink(args.output, args.force)
-
-    import pipeline
-    import statefile
+def _terrain_config(args, manifests, ctx: Ctx):
+    """The MarbleConfig a terrain stage runs under: what the capture stage
+    recorded, so the record is truthful, then --config, the terrain flags
+    and --set, in that order."""
     from config import MarbleConfig
 
-    trajs, inspectors, manifests = _load_trajectories(inputs)
-    if not trajs:
-        raise CLIError("no trajectories in the input")
-    # start from what the capture stage recorded, so the record is truthful
     captured = ((manifests[0].get("analysis") or {}).get("config") or {})
     cfg = MarbleConfig(**{k: captured[k] for k in CAPTURE_FIELDS if k in captured})
     models = {(m.get("meta") or {}).get("model") for m in manifests}
@@ -359,11 +353,24 @@ def cmd_project(args, ctx: Ctx) -> int:
     for flag, key in (("projection", "projection"), ("gauge", "gauge"),
                       ("density", "density"), ("seed", "seed"), ("grid_size", "grid_size"),
                       ("bootstrap", "density_bootstrap")):
-        if getattr(args, flag) is not None:
+        if getattr(args, flag, None) is not None:
             cfg = replace(cfg, **{key: getattr(args, flag)})
     for assignment in args.set or []:
         cfg = _set_field(cfg, assignment)
-    cfg = replace(cfg, use_cache=False)
+    return replace(cfg, use_cache=False)
+
+
+def cmd_project(args, ctx: Ctx) -> int:
+    inputs = _read_inputs(args.inputs, "a trajectory .mtj")
+    sink = Sink(args.output, args.force)
+
+    import pipeline
+    import statefile
+
+    trajs, inspectors, manifests = _load_trajectories(inputs)
+    if not trajs:
+        raise CLIError("no trajectories in the input")
+    cfg = _terrain_config(args, manifests, ctx)
 
     result = pipeline.project_trajectories(cfg, trajs, inspectors)
     buf = io.BytesIO()
@@ -774,6 +781,32 @@ def cmd_compare(args, ctx: Ctx) -> int:
     return 0
 
 
+def cmd_basin(args, ctx: Ctx) -> int:
+    import attractor
+    import pipeline
+
+    trajs, _, manifests = _load_trajectories(_read_inputs(args.inputs))
+    if not trajs:
+        raise CLIError("no trajectories in the input")
+    draws = attractor.NULL_DRAWS if args.draws is None else args.draws
+    if draws < 1:
+        raise CLIError("--draws must be at least 1")
+    cfg = _terrain_config(args, manifests, ctx)
+    out = []
+    for traj in trajs:
+        ctx.info(f"{draws} surrogates for {traj.meta.get('prompt')!r} "
+                 f"({cfg.gauge}/{cfg.projection}/{cfg.density})")
+        null = pipeline.basin_null(cfg, traj, draws=draws)
+        d = _plain(null)
+        d["surrogate_ratios"] = (None if null.surrogate_ratios is None else
+                                 [None if r != r else r for r in d["surrogate_ratios"]])
+        out.append({"prompt": traj.meta.get("prompt"), **d,
+                    "projection": cfg.projection, "gauge": cfg.gauge,
+                    "density": cfg.density, "explanation": attractor.explain_null(null)})
+    _print_json(out if len(out) > 1 else out[0], args.pretty)
+    return 0
+
+
 def cmd_sae(args, ctx: Ctx) -> int:
     import sae as sae_mod
 
@@ -1135,6 +1168,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", type=int, default=-1, help="token position (default: last)")
     p.add_argument("--pretty", action="store_true", help="indent the JSON")
     p.set_defaults(func=cmd_compare)
+
+    p = add("basin", "trajectory .mtj -> JSON: is each run's basin more than slowing steps?",
+            desc="Test each run's density basin against surrogate runs that keep every "
+                 "token's starting state and step sizes but give each step another "
+                 "token's direction. Each surrogate is projected afresh under the same "
+                 "settings, so --projection umap is slow.",
+            epilog="example:\n  mottled capture \"The capital of France is\" | mottled basin | jq .verdict")
+    p.add_argument("inputs", nargs="*", metavar="FILE", help="'-' or none = stdin")
+    p.add_argument("--draws", type=int, default=None, metavar="N",
+                   help="surrogate runs (default: attractor.NULL_DRAWS, the declared "
+                        "criterion; fewer is a different test)")
+    p.add_argument("--projection", choices=["pca", "umap"], default=None)
+    p.add_argument("--gauge", choices=["none", "rms", "center", "rms+center"], default=None)
+    p.add_argument("--density", choices=["kde", "knn"], default=None)
+    p.add_argument("--seed", type=int, default=None, help="projection, density and surrogate seed")
+    p.add_argument("--grid-size", type=int, default=None, metavar="N")
+    p.add_argument("--config", default=None, metavar="FILE.json",
+                   help="MarbleConfig fields as JSON (an analysis record works too)")
+    p.add_argument("--set", action="append", metavar="KEY=VALUE",
+                   help="set any MarbleConfig field; repeatable")
+    p.add_argument("--pretty", action="store_true", help="indent the JSON")
+    p.set_defaults(func=cmd_basin)
 
     p = add("sae", "trajectory .mtj + SAE .npz -> JSON fit report and top features",
             epilog="example:\n  mottled capture \"a b\" | mottled sae --sae res.npz | jq '.[0].top_features'")
