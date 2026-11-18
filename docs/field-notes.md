@@ -45,10 +45,12 @@ does no weight processing (no folding, no centring). 4.0 removed
 `HookedTransformer`: in the 4.4.0 wheel, `from transformer_lens import
 HookedTransformer` raises a message pointing at
 `TransformerBridge.boot_transformers`. The bridge is close to HF's numerics
-but not bit-identical: measured 2026-11-18 on 4.4.0, its residual stream
-differs from HF's `hidden_states` by up to 6.1e-5 absolute on GPT-2
-(2.5e-7 relative) and 1.3e-5 relative on Pythia-160m, where Mottled's own
-capture agrees with HF exactly. Mottled's `tlens` extra requires `>=4`, and
+but not bit-identical, and how close depends on the machine. Measured
+2026-11-18 on 4.4.0, worst relative state deviation from Mottled's capture
+across GPT-2, Qwen2.5-0.5B and Pythia-160m: 1.3e-5 in a cloud session (CPU,
+Python 3.13) and 3.3e-6 on the CI runner (Python 3.11, #77's evidence run).
+GPT-2's absolute deviation was 6.1e-5 in the session and 2.4e-4 on the
+runner. Mottled's own capture agrees with HF exactly on both. Mottled's `tlens` extra requires `>=4`, and
 the parity cell and `models/hooked.py` run on the bridge (until 2026-11-18
 they were pinned `<4` on `HookedTransformer`).
 

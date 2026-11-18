@@ -25,9 +25,9 @@ writing weights) changes the residual stream on purpose. A "disagreement"
 against a processed model would be a real difference reported as an error, so
 this harness uses ``TransformerBridge.boot_transformers`` with its defaults,
 which do no weight processing, and never calls ``enable_compatibility_mode``,
-which does. The bridge is close to HF's numerics, not bit-identical (about
-1e-5 relative on Pythia-160m), so this row's deviations are small but not
-zero, unlike the `transformers` row.
+which does. The bridge is close to HF's numerics, not bit-identical (1e-6
+to 1e-5 relative on the default models, varying by machine), so this row's
+deviations are small but not zero, unlike the `transformers` row.
 
 Nothing here runs in CI — the matrix downloads real weights. It is a command a
 reader runs, and `tests/test_parity.py` pins the machinery offline.
