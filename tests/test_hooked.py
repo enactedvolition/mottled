@@ -35,6 +35,23 @@ def test_to_trajectory_assembles_and_flows_through_the_stack():
     assert coords.shape == (L, T, 2)
 
 
+def test_from_cache_names_a_prompt_that_does_not_match_the_cache():
+    """A string prompt is re-tokenized with TL's default BOS; a cache run with
+    prepend_bos=False is one position shorter. The error says what to pass."""
+    torch = pytest.importorskip("torch")
+    from types import SimpleNamespace
+
+    from models.hooked import from_cache
+
+    L, T, D = 2, 5, 4
+    cache = {("resid_pre", 0): torch.zeros(1, T, D)}
+    cache.update({("resid_post", l): torch.zeros(1, T, D) for l in range(L)})
+    model = SimpleNamespace(cfg=SimpleNamespace(n_layers=L),
+                            to_str_tokens=lambda p: ["<|endoftext|>"] + p.split())
+    with pytest.raises(ValueError, match="pass the token tensor you ran"):
+        from_cache(cache, model, "the capital of france is")
+
+
 @pytest.mark.network
 def test_from_hooked_transformer_gpt2():
     bridge = pytest.importorskip("transformer_lens.model_bridge")

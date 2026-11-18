@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### The SAE preprocessing trap, measured properly
+- **README and field notes now give the spread, not one prompt.** jbloom's
+  GPT-2 layer-8 SAE reconstructs layer 8 with 20–35% error from a processed
+  TransformerLens capture and 43–349% (median 110%) from raw HF states, over
+  five prompts; the old "~342%" was the first prompt alone. TL with its
+  processing turned off reproduces the raw numbers exactly, so the
+  processing is the cause.
+- **TransformerLens 4 does not process weights by default.** On 4.4.0 a
+  default `TransformerBridge` capture mis-fits these SAEs exactly as raw HF
+  does; `process_weights()` or `enable_compatibility_mode()` restores
+  20–35%. The README says so.
+- **`models.hooked.from_cache` says what to pass** when a string prompt
+  re-tokenizes to a different length than the cache (a run with
+  `prepend_bos=False`), instead of failing on a bare count mismatch.
+
 ### TransformerLens 4
 - **The `tlens` extra moves to `transformer-lens>=4`**, and `mottled
   parity`'s TransformerLens row runs on `TransformerBridge.boot_transformers`
