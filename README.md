@@ -209,10 +209,18 @@ already ran, or states from NNsight or your own hooks all become a
 
 Public GPT-2 SAEs are trained on **TransformerLens-processed** residuals. TL
 folds LayerNorm and centres weights, which changes residual *values* while
-preserving the model's function. So the same trained SAE reads **~24%**
-reconstruction error on a TransformerLens capture and **~342%** on raw
-HuggingFace hidden states: same model, same SAE, same prompt
-([`docs/field-notes.md`](docs/field-notes.md), trap 1).
+preserving the model's function. So the same trained SAE (jbloom's layer-8
+`resid_pre`), on the same five prompts, reconstructs layer 8 with **20–35%**
+error from a processed TL capture and **43–349%** (median 110%) from raw
+HuggingFace hidden states, firing on 0.25% of features against 12.9%.
+Turning TL's processing off reproduces the raw numbers exactly, so the
+processing is the cause, not the library.
+
+**TransformerLens 4 changes the default.** Its `TransformerBridge` does not
+process weights unless asked, so on 4.x these SAEs mis-fit a default capture
+just as they mis-fit raw HF. Call `bridge.process_weights()` or
+`bridge.enable_compatibility_mode()` first: both give the 20–35% back
+([`docs/field-notes.md`](docs/field-notes.md), trap 1, has the table).
 
 Provenance is not calibration. `sae.fit_report` measures reconstruction error
 and firing density per layer, and the explorer labels a bad fit as

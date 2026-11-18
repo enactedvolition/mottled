@@ -177,10 +177,29 @@ Hard-won and specific. Each cost real debugging time.
 1. **Preprocessing is not provenance.** A trained SAE fits the activation
    distribution it was trained on — including the *preprocessing*.
    TransformerLens folds LayerNorm and centres weights, which changes
-   residual *values* while preserving the model's function. The same
-   jbloom SAE reads **~24% reconstruction error on a TL capture and ~342% on
-   raw HF states.** Never trust an SAE because it names your model —
-   measure the fit (`sae.fit_report`).
+   residual *values* while preserving the model's function. Never trust an
+   SAE because it names your model — measure the fit (`sae.fit_report`).
+   jbloom's GPT-2 layer-8 `resid_pre` SAE, layer-8 median reconstruction
+   error per prompt over five prompts ("The capital of France is", "The
+   Eiffel Tower is located in the city of", "def fibonacci(n): return",
+   "She opened the door and saw", "The residual stream moves, turns, and
+   settles"), torch 2.13 CPU, transformers 5.14.1:
+
+   | Capture | Layer-8 error | Best layer | Firing |
+   |---|---|---|---|
+   | HF transformers (raw) | 349, 204, 43, 110, 47% | 4, 6, 8, 7, 8 | 12.9% |
+   | TL 3.9 `HookedTransformer`, default (processed) | 24, 20, 35, 25, 27% | 8 ×5 | 0.25% |
+   | TL 3.9 `from_pretrained_no_processing` | identical to raw HF | | |
+   | TL 4.4 `TransformerBridge`, default | identical to raw HF | | |
+   | TL 4.4 bridge after `process_weights()` or `enable_compatibility_mode()` | 24, 20, 35, 25, 27% | 8 ×5 | 0.25% |
+
+   Prepending BOS moves the processed numbers by at most 2 points. The
+   processed and raw models agree on next-token probabilities to 8e-7 and
+   on layer-8 state norms (110.4 vs 110.5): centring changes the states'
+   direction, not their size. The earlier single figure, ~342% raw, was
+   the first prompt alone; the spread across prompts is the honest number.
+   **TransformerLens 4 does not process weights by default**, so on 4.x a
+   default capture mis-fits these SAEs exactly as raw HF does.
 2. **CKA saturates on residual streams.** A few very-high-variance
    dimensions shared by every layer dominate the inner products, so raw CKA
    scores ~1.0 for *every* layer pair and its argmax is noise (measured:

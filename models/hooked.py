@@ -98,6 +98,14 @@ def from_cache(cache, model, prompt, top_k: int = 5,
     str_tokens = [_clean_token(t) for t in model.to_str_tokens(prompt)]
     with torch.no_grad():
         hidden = residual_stack(cache, int(model.cfg.n_layers))
+        # a string is re-tokenized with TL's default BOS, so a cache run with
+        # prepend_bos=False is one position shorter; say so here rather than
+        # let validate() report a bare count mismatch after the readout
+        if len(str_tokens) != hidden.shape[1]:
+            raise ValueError(
+                f"the cache has {hidden.shape[1]} positions but to_str_tokens(prompt) "
+                f"gives {len(str_tokens)}; pass the token tensor you ran (e.g. "
+                f"model.to_tokens(text, prepend_bos=False)) instead of the string")
         lens = model.unembed(model.ln_final(hidden))          # (L, T, V) logit lens
 
     lens_np = lens.float().cpu().numpy()
