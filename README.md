@@ -96,11 +96,14 @@ mottled intervene "The capital of France is" --layer -2 \
     --direction-token " Paris" --scale 8 --target " Paris" --all-positions
 mottled dose "The capital of France is" --layer -2 --direction-token " Paris" \
     --target " Paris" --grid=-2,-1,0,1,2
+mottled capture "The capital of France is" | mottled basin --gauge rms | jq .verdict
 ```
 
 `intervene` and `dose` score the push against norm-matched random
 controls. With `--all-positions` the effect is measured at every position
-the push touched, not only the last one.
+the push touched, not only the last one. `basin` tests the drawn basin
+against surrogate runs with the same step sizes, and says why when it
+cannot (`docs/validity.md`).
 
 ### In a notebook
 

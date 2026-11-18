@@ -17,6 +17,7 @@ from dataclasses import replace
 
 import numpy as np
 
+import attractor as attractor_mod
 import cache as cache_mod
 import compare as compare_mod
 import density as density_mod
@@ -112,14 +113,8 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
                          input_ids=input_ids)
 
     space = projection_mod.gauge([traj.hidden], cfg.gauge)[0]
-    coords, projector = projection_mod.project(
-        space, method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed
-    )
+    coords, projector, landscape = _terrain(cfg, space, bootstrap=cfg.density_bootstrap)
     quality = projection_mod.projection_quality(space, coords, projector)
-    landscape = density_mod.compute_density(
-        coords, method=cfg.density, grid_size=cfg.grid_size, padding=cfg.grid_padding,
-        bootstrap=cfg.density_bootstrap, seed=cfg.seed,
-    )
     surface = terrain_mod.mesh(
         landscape, smooth_sigma=cfg.smooth_sigma,
         height_scale=cfg.height_scale, invert=cfg.invert_terrain,
@@ -147,6 +142,32 @@ def run_pipeline(cfg: MarbleConfig, prompt: str, model=None, tokenizer=None,
     if disk is not None:
         disk.put(key, result)
     return result
+
+
+def _terrain(cfg: MarbleConfig, space: np.ndarray, bootstrap: int = 0):
+    """One run's gauged states -> (coords, projector, landscape): the
+    projection fitted on them and the density over the result."""
+    coords, projector = projection_mod.project(
+        space, method=cfg.projection, n_components=cfg.n_components, seed=cfg.seed
+    )
+    landscape = density_mod.compute_density(
+        coords, method=cfg.density, grid_size=cfg.grid_size, padding=cfg.grid_padding,
+        bootstrap=bootstrap, seed=cfg.seed,
+    )
+    return coords, projector, landscape
+
+
+def basin_null(cfg: MarbleConfig, traj: StateTrajectory,
+               draws: int = attractor_mod.NULL_DRAWS) -> attractor_mod.BasinNull:
+    """One run's basin against the step-direction null (`attractor.basin_null`),
+    under `cfg`'s own gauge, projection and density estimator. Every surrogate
+    is projected afresh, so `draws` UMAP fits is slow; PCA takes seconds."""
+    def basin_of(space):
+        coords, _, landscape = _terrain(cfg, space)
+        return attractor_mod.members_of(coords, landscape)
+
+    space = projection_mod.gauge([traj.hidden], cfg.gauge)[0]
+    return attractor_mod.basin_null(space, basin_of, draws=draws, seed=cfg.seed)
 
 
 def _lens(cfg: MarbleConfig):

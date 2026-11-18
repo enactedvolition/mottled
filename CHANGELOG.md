@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### A null for the basin
+- **`attractor.basin_null`** (`mottled basin`, and a button in the
+  explorer's "Why this attractor") tests a run's basin against 200 surrogate
+  runs that keep every token's starting state and step sizes but give each
+  step another token's direction, each projected afresh. It asks whether
+  members from different tokens sit closer together than slowing steps and
+  shared drift explain, with the criterion (200 surrogates, α = 0.05) fixed
+  in code. Calibrated on synthetic walks: 2 of 37 testable runs survived
+  with no basin planted, and 19 of 19 with one.
+- **It refuses rather than answers** when a token's states are more than 2×
+  the others' norm (GPT-2's position 0 is ~35×, and made every raw-space
+  basin "survive" a first version), when the basin holds more than half
+  the states, when it is one token or a band of depth, and when fewer than
+  19 surrogates are comparable.
+- **On five GPT-2 small prompts there is no basin to test yet.** The
+  explorer's half-peak basin holds 57–87% of states under each gauge that
+  does not keep the sink; it
+  is the plateau of a smooth density, not a region. `docs/validity.md` has
+  the numbers.
+
 ### Caught up with the field (re-verified 2026-11-16)
 - **`docs/field-notes.md` re-verified** after three months. Every version
   and Hub entry was checked again, and the file adds what appeared or was
