@@ -51,7 +51,8 @@ class TunedLens:
     base_model_revision: str | None   # the weights it was trained against
     # "jacobian": an averaged-Jacobian lens (experiments/jacobian_lens.py)
     # stored in this format. It is not KL-trained, so naming it "tuned"
-    # would claim a fit it never had.
+    # would claim a fit it never had. "relevance": the same estimator under
+    # LRP backward rules (the R-lens, `--backward lrp`).
     kind: str = "tuned"
 
     @property
@@ -65,11 +66,12 @@ class TunedLens:
 
 
 def readout_name(meta) -> str:
-    """"tuned lens", "Jacobian lens" or "logit lens", from a trajectory's
-    meta. A capture that does not say is a raw logit lens: every backend
-    before this one was."""
+    """"tuned lens", "Jacobian lens", "R-lens" or "logit lens", from a
+    trajectory's meta. A capture that does not say is a raw logit lens:
+    every backend before this one was."""
     kind = ((meta or {}).get("lens") or {}).get("kind", "logit")
-    return {"tuned": "tuned lens", "jacobian": "Jacobian lens"}.get(kind, "logit lens")
+    return {"tuned": "tuned lens", "jacobian": "Jacobian lens",
+            "relevance": "R-lens"}.get(kind, "logit lens")
 
 
 def from_dir(path) -> TunedLens:

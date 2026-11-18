@@ -13,7 +13,7 @@ until the research requirements settle. Run from the repository root
 | `sotu_corpus.jsonl` | 80 State of the Union excerpts, the experiment's corpus |
 | `make_sotu_corpus.py` | Rebuilds `sotu_corpus.jsonl` from the npm package, byte for byte |
 | `introspection.py` | Can a model learn to report a concept written into its residual stream? (pre-registered below) |
-| `jacobian_lens.py` | Fits a Jacobian lens (the corpus-averaged Jacobian to the last state) as a tuned-lens directory |
+| `jacobian_lens.py` | Fits a Jacobian lens (the corpus-averaged Jacobian to the last state) as a tuned-lens directory; `--backward lrp` fits the R-lens |
 | `introspection_workspace.py` | Does the Jacobian-lens component of the introspection concept directions reach report? (pre-registered below) |
 
 ## `patching.py`
@@ -642,9 +642,36 @@ that layer's J from the full fit; a partial lens is refused as a readout;
 `main` fits on exactly the registered train documents and prints the hash of
 what it wrote.
 
-Known gap: the viewer names a scene's readout from its `config.lens` string
-alone, so a scene exported through a Jacobian-lens directory shows "tuned
-lens" there. Trajectory records and the Python surfaces name it correctly.
+The viewer names a scene's readout from the runs' recorded `lens.kind`,
+falling back to `config.lens` only for records that predate it, so a scene
+exported through a Jacobian-lens directory says "Jacobian lens", not "tuned
+lens" (`viewer/tests/reading.test.js`).
+
+**The R-lens (`--backward lrp`).** The same estimator, with layer-wise
+relevance propagation rules installed in the backward ("R-lens: making J-lens
+more faithful on early layers", LessWrong, 2026): the LN-rule on each block's
+residual-stream RMSNorms (the normalisation factor is a constant), the
+identity rule on the gate activation (act(z) backpropagates as
+z · stop_grad(act(z)/z)), and the half rule on gate × up (each input gets half
+the gradient). Linear layers, attention and the q/k norms are unmodified, as
+in the post. The post says the product splits relevance "evenly"; the factor
+0.5 is the AttnLRP uniform rule's reading of that, and is an assumption. The
+rules are forward hooks that leave every forward value bit-identical and
+check the module computes the formula the rule assumes, so a layout the rules
+do not describe (GPT-2's LayerNorm and ungated MLP, an MoE block) is refused,
+not read under the wrong rule. The lens is written with `lens_kind:
+"relevance"` and `backward: "lrp"`, and reads as "R-lens".
+
+The post reports the R-lens advantage growing with model size and absent on
+its smallest models. Nothing here measures it: Mottled has no R-lens result,
+and a comparison should be registered before one is run.
+
+Pinned additionally: the rules leave logits and every state bit-identical;
+each rule's backward equals its formula on a single module (and each of
+those tests fails with the rule removed or changed); the R-lens is the
+registered estimator over the ruled graph and differs from the J-lens;
+unsupported layouts and an unknown `backward` are refused; `main --backward
+lrp` writes a lens that names itself.
 
 ## `introspection_workspace` — pre-registered analysis plan
 

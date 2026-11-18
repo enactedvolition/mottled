@@ -1039,7 +1039,7 @@ function renderReading(scene, keepOpen) {
                                 (p.gauge !== "none" ? ` of ${esc(p.gauge)}-gauged states` : ""));
     if (p.density) bits.push(`${esc(p.density)} density`);
     if (p.seed !== null) bits.push(`seed ${esc(p.seed)}`);
-    bits.push(p.lens === "logit" ? "logit lens" : "tuned lens");
+    bits.push(p.lensName);
     if (p.sae && p.sae.source) bits.push(`SAE ${esc(p.sae.source)}`);
     rows.push(
       `<p class="reading-prov"><b>What produced this.</b> ${models} · ` +
