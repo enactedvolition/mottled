@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### TransformerLens 4
+- **The `tlens` extra moves to `transformer-lens>=4`**, and `mottled
+  parity`'s TransformerLens row runs on `TransformerBridge.boot_transformers`
+  with its defaults (no weight processing), since 4.0 removed
+  `HookedTransformer` and `from_pretrained_no_processing`. The row still
+  loads without TL's prepended BOS. `models.hooked.from_cache` and
+  `from_hooked_transformer` already worked on the bridge unchanged: it keeps
+  the `resid_pre`/`resid_post` cache keys and `ln_final`, `unembed`, `W_E`.
+  A capture's `meta.family` now names the class that produced it instead
+  of always saying "HookedTransformer". The evidence workflow pins
+  `transformer-lens==4.4.0`. Measured on 4.4.0 (this session, CPU): every
+  TransformerLens cell passes on the three default models, with the largest
+  state deviation 1.33e-5 relative (Pythia-160m). The bridge is close to
+  HF, not bit-identical; `docs/field-notes.md` has the numbers.
+
 ### A null for the basin
 - **`attractor.basin_null`** (`mottled basin`, and a button in the
   explorer's "Why this attractor") tests a run's basin against 200 surrogate

@@ -1,4 +1,9 @@
-"""Optional TransformerLens producer: a HookedTransformer -> StateTrajectory.
+"""Optional TransformerLens producer: a TransformerLens model -> StateTrajectory.
+
+Works on TransformerLens 4's ``TransformerBridge`` and on a pre-4
+``HookedTransformer``: both expose ``run_with_cache`` with the same
+``resid_pre`` / ``resid_post`` cache keys, ``ln_final``, ``unembed`` and
+``W_E``, which is all this module touches.
 
 TransformerLens is *not* a dependency — import this module only if you have it
 installed (`pip install transformer-lens`). Rather than route a
@@ -34,7 +39,8 @@ def _to_trajectory(hidden: np.ndarray, tokens: list[str], lens: np.ndarray,
                    top_k: int = 5, keep_logits: bool = True,
                    model_name: str = "hooked", prompt: str = "",
                    device: str | None = None,
-                   dtype: str | None = None) -> StateTrajectory:
+                   dtype: str | None = None,
+                   family: str = "HookedTransformer") -> StateTrajectory:
     """Assemble a StateTrajectory from an extracted residual stack + logit lens.
 
     hidden: (L, T, D) residual stream (layer 0 = embeddings), lens: (L, T, V)
@@ -53,7 +59,7 @@ def _to_trajectory(hidden: np.ndarray, tokens: list[str], lens: np.ndarray,
         vocab=vocab,
         embedding_matrix=np.asarray(embedding_matrix, dtype=np.float32),
         meta={"backend": "transformer_lens", "model": model_name,
-              "prompt": prompt, "family": "HookedTransformer",
+              "prompt": prompt, "family": family,
               # provenance.record reads these; TransformerLens carries no hub
               # commit of its own, so `revision` stays absent rather than being
               # filled with the name of the checkpoint TL converted from
@@ -104,12 +110,16 @@ def from_cache(cache, model, prompt, top_k: int = 5,
         model_name=getattr(model.cfg, "model_name", "hooked"),
         prompt=prompt if isinstance(prompt, str) else "",
         device=str(hidden.device), dtype=str(hidden.dtype).removeprefix("torch."),
+        # a bridge capture labelled "HookedTransformer" would name a class
+        # TransformerLens 4 no longer has
+        family=type(model).__name__,
     )
 
 
 def from_hooked_transformer(model, prompt: str, top_k: int = 5,
                             keep_logits: bool = True) -> StateTrajectory:
-    """Capture a TransformerLens ``HookedTransformer`` as a StateTrajectory.
+    """Capture a TransformerLens ``TransformerBridge`` (or pre-4
+    ``HookedTransformer``) as a StateTrajectory.
 
     Uses ``run_with_cache`` to read the residual stream after every block, then
     hands the cache to `from_cache`. Call that directly if you already have one.

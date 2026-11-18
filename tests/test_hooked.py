@@ -1,8 +1,8 @@
 """Optional TransformerLens producer (models/hooked.py).
 
 The StateTrajectory assembly is tested offline with numpy stand-ins; the real
-HookedTransformer path is a network test, skipped unless transformer-lens is
-installed (loading a model downloads weights).
+TransformerLens path (TransformerBridge, TL >= 4) is a network test, skipped
+unless transformer-lens is installed (loading a model downloads weights).
 """
 import numpy as np
 import pytest
@@ -37,11 +37,12 @@ def test_to_trajectory_assembles_and_flows_through_the_stack():
 
 @pytest.mark.network
 def test_from_hooked_transformer_gpt2():
-    tl = pytest.importorskip("transformer_lens")
+    bridge = pytest.importorskip("transformer_lens.model_bridge")
     from models.hooked import from_hooked_transformer
 
-    model = tl.HookedTransformer.from_pretrained("gpt2")
+    model = bridge.TransformerBridge.boot_transformers("gpt2")
     traj = from_hooked_transformer(model, "The capital of France is")
     traj.validate()
     assert traj.n_layers == model.cfg.n_layers + 1
     assert traj.logits is not None
+    assert traj.meta["family"] == "TransformerBridge"
