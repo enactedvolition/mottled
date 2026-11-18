@@ -237,16 +237,15 @@ def test_render_pins_the_basin_annotation():
 
 
 # ------------------------------------------------------------ the basin null
-def _walks(seed, converge=(), shared=0.0, L=13, T=12, D=64):
-    """Synthetic residual streams with known answers. Every token takes steps
-    of the same shrinking size; `converge` tokens spend theirs heading for
-    one point, the rest go their own way, or with `shared` mostly the
-    layer's common way (drift every token shares, which the null must not
-    count as a basin)."""
+def _run(seed, converge=(), shared=0.0, L=13, T=12, D=64):
+    """The synthetic residual streams the null was calibrated on (numbers in
+    `attractor.basin_null`). Every token takes steps of the same shrinking
+    size; `converge` tokens spend theirs heading for one point, the rest go
+    their own way, or with `shared` mostly the layer's common way."""
     rng = np.random.default_rng(seed)
     h = np.zeros((L, T, D))
-    h[0] = rng.normal(size=(T, D)) * 3.0 / np.sqrt(D)
-    target = rng.normal(size=D) * 3.0 / np.sqrt(D)
+    h[0] = rng.normal(size=(T, D)) * 24.0 / np.sqrt(D)
+    target = rng.normal(size=D) * 24.0 / np.sqrt(D)
     for layer in range(1, L):
         size = 6.0 * 0.8 ** layer
         common = rng.normal(size=D)
@@ -266,8 +265,13 @@ def _walks(seed, converge=(), shared=0.0, L=13, T=12, D=64):
 
 
 def _basin_of(space):
-    coords, _ = P.project(space)
-    return A.members_of(coords, D.compute_density(coords))
+    """The explorer's basin under its default terrain, as `pipeline.basin_null`
+    builds it."""
+    import pipeline
+    from config import MarbleConfig
+
+    coords, _, landscape = pipeline._terrain(MarbleConfig(use_cache=False), space)
+    return A.members_of(coords, landscape)
 
 
 def test_concentration_names_what_it_cannot_test():
@@ -279,20 +283,19 @@ def test_concentration_names_what_it_cannot_test():
     band = A.concentration(space, np.array([[l, t] for l in (2, 3) for t in range(3)]))
     assert (none.status, one.status, band.status) == ("no-members", "one-token", "depth-band")
     assert one.n_member_tokens == 1 and one.ratio is None
-    assert A.concentration(space, np.array([[3, 0], [3, 1]])).status == "tested"
+    tested = A.concentration(space, np.array([[3, 0], [3, 1]]))
+    assert tested.status == "tested" and (tested.n_members, tested.n_states) == (2, 12)
 
 
 def test_concentration_is_low_only_where_tokens_meet():
-    meet = _walks(0, converge=range(3, 8))
-    apart = _walks(0)
     members = np.array([[l, t] for l in range(8, 13) for t in range(3, 8)])
     rng = np.random.default_rng(0)
-    assert A.concentration(meet, members, draws=50, rng=rng).ratio < 0.5
-    assert 0.8 < A.concentration(apart, members, draws=50, rng=rng).ratio < 1.2
+    assert A.concentration(_run(0, converge=range(3, 8)), members, draws=50, rng=rng).ratio < 0.5
+    assert 0.8 < A.concentration(_run(0), members, draws=50, rng=rng).ratio < 1.2
 
 
 def test_step_direction_surrogate_keeps_starts_and_step_sizes_and_moves_directions():
-    h = _walks(1, converge=range(3, 8))
+    h = _run(1, converge=range(3, 8))
     s = A.step_direction_surrogate(h, np.random.default_rng(0))
     assert s.shape == h.shape and s.dtype == h.dtype
     np.testing.assert_array_equal(s[0], h[0])
@@ -305,21 +308,40 @@ def test_step_direction_surrogate_keeps_starts_and_step_sizes_and_moves_directio
     assert not np.allclose(s, h)
 
 
-def test_basin_null_tells_convergence_from_slowing_and_shared_drift():
-    """Five of twelve tokens converging survives; independent walks and a
-    drift every token shares do not, though all three slow down alike. The
-    calibration this rests on (2 of 40 null runs survive at alpha 0.05) is in
-    `basin_null`'s docstring; this pins the three cases it was measured on."""
-    draws = 60
-    met = A.basin_null(_walks(0, converge=range(3, 8)), _basin_of, draws=draws, seed=0)
-    walk = A.basin_null(_walks(0), _basin_of, draws=draws, seed=0)
-    drift = A.basin_null(_walks(0, shared=0.8), _basin_of, draws=draws, seed=0)
-    assert met.verdict == "survives" and met.p_surrogate <= 1 / draws + 1e-9
+def test_basin_null_tells_convergence_from_independent_walks():
+    """Two of the calibration runs, at the declared criterion: five of twelve
+    tokens converging survives (calibration: 19 of 19 testable runs), walks
+    with no basin do not (2 of 37 testable runs survived)."""
+    met = A.basin_null(_run(3000, converge=range(3, 8)), _basin_of, seed=3000)
+    walk = A.basin_null(_run(2031), _basin_of, seed=2031)
+    assert met.verdict == "survives" and met.p_surrogate <= A.NULL_ALPHA
     assert walk.verdict == "within-null" and walk.p_surrogate > 0.2
-    assert drift.verdict == "within-null" and drift.p_surrogate > 0.2
-    for r in (met, walk, drift):
-        assert r.surrogate_ratios.shape == (draws,) and r.draws == draws
-        assert (r.alpha, r.seed) == (A.NULL_ALPHA, 0)
+    for r in (met, walk):
+        assert r.draws == A.NULL_DRAWS and r.surrogate_ratios.shape == (A.NULL_DRAWS,)
+        assert np.isfinite(r.surrogate_ratios).sum() >= 1 / A.NULL_ALPHA - 1
+
+
+def test_a_basin_that_is_most_of_the_picture_is_not_a_region():
+    space = _run(2000)
+    broad = np.array([[l, t] for l in range(13) for t in range(12) if (l + t) % 3])
+    r = A.basin_null(space, lambda h: broad, draws=5)
+    assert r.verdict == "not-a-region" and r.surrogate_ratios is None
+    assert r.observed.n_members > A.MAX_REGION_SHARE * r.observed.n_states
+    text = A.explain_null(r)
+    assert "not tested" in text and f"{len(broad)} of 156" in text
+
+
+def test_surrogates_that_are_not_regions_do_not_count_and_too_few_is_underpowered():
+    """The run is held to being a region, so the surrogates are too:
+    comparing a localized run with mostly broad surrogates biased p low."""
+    space = _run(2000)
+    small = np.array([[l, t] for l in range(9, 13) for t in (2, 5, 9)])
+    broad = np.array([[l, t] for l in range(13) for t in range(12)])
+    calls = iter([small] + [broad] * 4 + [small] * 16)
+    r = A.basin_null(space, lambda h: next(calls), draws=20)
+    assert r.verdict == "underpowered" and r.p_surrogate is None
+    assert np.isfinite(r.surrogate_ratios).sum() == 16 < 1 / r.alpha - 1
+    assert "untested, not refuted" in A.explain_null(r)
 
 
 def test_basin_null_does_not_test_what_it_cannot():
@@ -333,7 +355,7 @@ def test_a_token_on_another_scale_is_refused_not_tested():
     """GPT-2's position 0 sits at ~35x the other tokens' norm; with it in the
     picture every raw-space basin "survived". The null declines instead, and
     unit-RMS states (the `rms` gauge) take the outlier away."""
-    h = _walks(0, converge=range(3, 8))
+    h = _run(0, converge=range(3, 8))
     h[:, 0] *= 40.0
     r = A.basin_null(h, _basin_of, draws=5)
     assert r.verdict == "scale-outlier" and r.surrogate_ratios is None
@@ -345,14 +367,21 @@ def test_a_token_on_another_scale_is_refused_not_tested():
     assert A.basin_null(unit.astype(np.float32), _basin_of, draws=5).verdict != "scale-outlier"
 
 
+def _null(verdict, ratio, p, ratios):
+    observed = A.Concentration("tested", 5, 1.0, ratio, 200, n_members=40, n_states=156)
+    return A.BasinNull(observed, np.array(ratios, dtype=float), p, verdict, len(ratios),
+                       A.NULL_ALPHA, 0)
+
+
 def test_explain_null_claims_geometry_not_mechanism():
-    met = A.basin_null(_walks(0, converge=range(3, 8)), _basin_of, draws=30, seed=0)
-    walk = A.basin_null(_walks(0), _basin_of, draws=30, seed=0)
-    yes, no = A.explain_null(met), A.explain_null(walk)
+    ratios = [0.9] * 30 + [np.nan] * 10
+    yes = A.explain_null(_null("survives", 0.62, 1 / 31, ratios))
+    no = A.explain_null(_null("within-null", 0.95, 0.42, ratios))
     assert "state concentration region" in yes and "not mechanism" in yes
     assert "intervention" in yes and "attractor" not in yes.lower()
-    assert "not evidence of anything more" in no
-    assert f"{met.observed.ratio:.2f}" in yes and "30 surrogate runs" in yes
+    assert "0.62×" in yes and "Of 40 surrogate runs" in yes and "30 had a basin" in yes
+    assert "**0** of those" in yes
+    assert "not evidence of anything more" in no and "**30** of those" in no
 
 
 def test_pipeline_basin_null_projects_every_surrogate_afresh(monkeypatch):

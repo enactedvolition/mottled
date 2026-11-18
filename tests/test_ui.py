@@ -104,6 +104,27 @@ def test_streamlit_app_surfaces_projection_fidelity_inline():
     assert any("Projection fidelity" in t for t in texts)
 
 
+def test_streamlit_app_tests_the_basin_on_demand():
+    """The null runs only when asked (200 refits are too slow for every
+    rerun), and its answer lands in the explorer. Raw GPT-2 states carry the
+    position-0 sink, so the answer here is the refusal that names it."""
+    pytest.importorskip("streamlit.testing.v1")
+    from tests.apptest import app_test
+
+    at = app_test(default_timeout=120)
+    at.run()
+    at.text_area(key="prompt").set_value("The capital of France is")
+    at.selectbox(key="model").select("gpt2")
+    at.button(key="run").click()
+    at.run()
+    assert not any("Is it more than slowing down?" in m.value for m in at.markdown)
+    at.button(key="basin_null").click()
+    at.run()
+    assert not at.exception
+    answer = [m.value for m in at.markdown if "Is it more than slowing down?" in m.value]
+    assert len(answer) == 1 and "not tested" in answer[0] and "`rms`" in answer[0]
+
+
 def test_flat_api_survives_the_module_split():
     """`ui.py` was split into pipeline.py + render.py; every name the README
     documents must still import from `ui`, and be the same object."""

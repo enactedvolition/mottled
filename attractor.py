@@ -471,6 +471,14 @@ def basin_null(space: np.ndarray, basin_of, draws: int = NULL_DRAWS,
     is greater than in all but `alpha` of the comparable surrogates
     (`step_direction_surrogate`).
 
+    Calibrated at the declared criterion on synthetic walks (the generator
+    is `_run` in tests/test_attractor.py). With no basin planted, 2 of the
+    37 runs that got a p-value survived, and p was near uniform (deciles
+    0.08, 0.28, 0.52, 0.73, 0.84). With five of twelve tokens converging,
+    19 of 19 did. Most runs got no p-value: 203 of 240 and 21 of 40 were
+    not regions, depth bands or underpowered. So "within-null" is evidence,
+    and an untested basin is not.
+
     Surviving shows a concentration these tokens reach in this run that step
     sizes do not explain. It does not show the model uses it: that takes an
     intervention.

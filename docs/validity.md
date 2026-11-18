@@ -140,8 +140,38 @@ The honest upgrades, in order of strength:
 - A **pre-specified operational criterion** for calling something a basin —
   threshold, null distribution, effect size — declared before looking.
 
-None of these are implemented yet; until they are, a basin from a single
-run is an observation about that run's projected states, full stop.
+**One null and a declared criterion now exist** (`attractor.basin_null`,
+`mottled basin`, the explorer's "Test against 200 surrogate runs"). They test
+the basin the explorer draws against surrogate runs that keep every token's
+starting state and step sizes but give each step another token's direction,
+so a pile-up that slowing steps or a drift every token shares would produce
+does not count. The criterion is fixed in code: 200 surrogates, α = 0.05.
+On synthetic walks with no basin planted, 2 of 37 testable runs survived;
+with five of twelve tokens converging, 19 of 19 did.
+
+It declines more often than it answers, and each refusal says why:
+
+- **A token on another scale.** GPT-2 small's position 0 has ~35× the
+  other tokens' norm. With it in the picture, every raw-space basin of five
+  prompts "survived" a first version of this null; with position 0 dropped,
+  or each state scaled to unit RMS, none did. The null refuses a token above
+  2× (no token without a sink measured above 1.40×) and says to use the
+  `rms` gauge.
+- **Not a region.** A basin holding more than half the states is the
+  typical state, not a concentration. The explorer's half-peak basin
+  usually is: 57–87% of states on those five GPT-2 prompts under the
+  raw, `rms` and `rms+center` gauges (`center` keeps the sink and is refused). The density estimate is smooth over the whole cloud, and even 30
+  states pulled 99% of the way together did not shrink the basin below 71%.
+- **One token, a band of depth, or too few comparable surrogates.**
+
+So on GPT-2 there is, so far, no basin to test: with the sink gauged out,
+the basin is most of the picture. Surviving the null would show a state
+concentration region that step sizes do not explain, in this run. It would
+not show the model uses it; that takes an intervention. The block
+bootstrap, a prompt ensemble, matched random prompts, and a basin
+definition that can localize remain undone. Until a basin survives, one
+from a single run is an observation about that run's projected states,
+full stop.
 
 ## "Dynamics" is three different things
 
